@@ -75,7 +75,7 @@ The helper caps connection counts per source and in total, rate-limits pairing r
 
 ## Review status
 
-The pairing, helper server, and TV client underwent AI-assisted security reviews during development. The findings were fixed. These reviews weren't an audit or certification. Treat Lumen as experimental software.
+The pairing, helper server, and TV client underwent AI-assisted security reviews during development. Findings were either fixed or documented as known limitations on this page. These reviews weren't an audit or certification. Treat Lumen as experimental software.
 
 ## Diagnostic logs
 

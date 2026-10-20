@@ -84,8 +84,6 @@ These commands and their output were verified with T3 Code (Beta) 0.1.0.
 
    Replace *`SESSION_ID`* with the ID from the session list. A successful revocation prints *`Revoked session SESSION_ID.`*, with your session ID in place of *`SESSION_ID`*.
 
-The session may also appear in T3 Code's connected clients list, if present.
-
 ## Verify removal
 
 Complete the TV checks before turning network debugging off.
