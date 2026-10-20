@@ -57,7 +57,10 @@ service shows agent notifications over other apps.
 
 `mac/LumenAgents.swift` is a small helper for the Mac (one Swift file, no dependencies). It reads T3 Code with
 its own read-only token (`t3 auth session issue --scope orchestration:read`, listed as "Lumen TV" in T3 Code's
-connections and revocable there), loads the thread list from `/api/orchestration/shell`, then follows the
+connections and revocable there; it lasts 30 days and is renewed on its own). The token only goes to T3 Code itself:
+before each request the helper checks that the process named in T3's `server-runtime.json` is T3 Code's app, run by
+you, and listening on that port, so another user can't catch it by taking the port while T3 Code is closed. It
+loads the thread list from `/api/orchestration/shell`, then follows the
 server's shell stream so it only wakes when a chat changes. It shares a short summary on port 47837 (the TV's
 request waits there until something changes, so updates are instant without polling) and
 advertises it over Bonjour as `_lumen-agents._tcp`, so the TV finds the Mac even when its address changes. All
@@ -77,7 +80,10 @@ in between can't guess the code, and can't work it out from what it sees. Until 
 when you type the code it checks the TV's latest signed request against it. After that requests (path, query and
 time) are signed (HMAC-SHA256) and replies encrypted (AES-GCM) with that key, so other devices on the Wi-Fi can
 neither read the status nor fake it, and the TV ignores anything that isn't sealed with it: it never drops the key
-on its own. To pair with a new key (say after `lumen-agents unpair`), pick **Pair again** in Lumen's Settings. The
+on its own. To pair with a new key (say after `lumen-agents unpair`), pick **Pair again** in Lumen's Settings; it
+also asks the Mac to drop the old key, with a request signed by it, so only that TV can (if the Mac can't be reached,
+`lumen-agents unpair` removes it). Keys are marked with the pairing scheme that made them, and both sides drop keys
+without that mark, so after this update the TV shows a new code once: type it on the Mac again. The
 `lumen-agents` commands talk to the helper on 127.0.0.1 with a secret it writes for them at start, so other users
 and web pages can't. Token, pairings and logs live in `~/Library/Application Support/Lumen Agents` and
 `~/Library/Logs/lumen-agents.log`, readable only by you.

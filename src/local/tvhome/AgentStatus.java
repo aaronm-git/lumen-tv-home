@@ -57,6 +57,8 @@ final class AgentStatus {
     static final int SEARCHING = 0, OFFLINE = 1, PAIRING = 2, READY = 3;
     private static final String SERVICE = "_lumen-agents._tcp";
     private static final long POLL_MS = 4000, RETRY_MS = 10_000, SEARCH_MS = 8000;
+    /** The pairing scheme a key was made with; keys from older ones (six-digit codes) are dropped. */
+    private static final int SCHEME = 2;
     /** Who wants updates: the home screen and/or notifications. */
     static final String HOME = "home", NOTIFY = "notify";
     private static AgentStatus instance;
@@ -174,16 +176,25 @@ final class AgentStatus {
         return sp.getBoolean("paired", false);
     }
 
-    /** Main thread. Settings: Pair again. Forgets the key, so the next request pairs with a new code. */
+    /**
+     * Main thread. Settings: Pair again. Forgets the key, here and (if it can reach it) on the Mac, so the next
+     * request pairs with a new code.
+     */
     void pairAgain() {
         Handler w = worker;
         if (w == null) {
+            String host = sp.getString("host", null), device = sp.getString("device", null);
+            String key = sp.getString("key", null);
             forget();
+            new Thread(() -> revoke(host, device, key)).start();
             return;
         }
         w.post(() -> {
             if (w != worker) return;
+            String host = sp.getString("host", null), device = sp.getString("device", null);
+            String key = sp.getString("key", null);
             forget();
+            revoke(host, device, key);
             failures = 0;
             w.removeCallbacksAndMessages(null);
             poll(w);
@@ -193,8 +204,37 @@ final class AgentStatus {
     }
 
     private void forget() {
-        sp.edit().remove("key").remove("code").remove("device").putBoolean("paired", false).apply();
+        sp.edit().remove("key").remove("scheme").remove("code").remove("device").putBoolean("paired", false).apply();
         version = -1;
+    }
+
+    /**
+     * Best effort: asks the Mac to drop the key it keeps for this TV, with a request signed by that key (so nobody
+     * else can). If the Mac can't be reached, `lumen-agents unpair` there removes it.
+     */
+    private static void revoke(String host, String device, String key) {
+        if (host == null || device == null || key == null) return;
+        try {
+            byte[] k = Base64.decode(key, Base64.NO_WRAP);
+            if (k.length != 32) return;
+            String time = String.valueOf(System.currentTimeMillis());
+            HttpURLConnection c = open(host, "/forget");
+            try {
+                c.setRequestMethod("POST");
+                c.setRequestProperty("X-Lumen-Device", device);
+                c.setRequestProperty("X-Lumen-Time", time);
+                c.setRequestProperty("X-Lumen-Auth",
+                        hex(hmac(k, ("POST /forget\n" + time).getBytes(StandardCharsets.UTF_8))));
+                c.setDoOutput(true);
+                c.setFixedLengthStreamingMode(0);
+                c.getOutputStream().close();
+                c.getResponseCode();
+            } finally {
+                c.disconnect();
+            }
+        } catch (IOException | GeneralSecurityException | RuntimeException ignored) {
+            // Pair again anyway.
+        }
     }
 
     /** The code as the TV shows it: K7QM-9XRT-4HNP-2WVD. */
@@ -210,6 +250,8 @@ final class AgentStatus {
 
     private void poll(Handler w) {
         if (w != worker) return;
+        // A key from an older pairing scheme: the Mac no longer accepts it, so start over.
+        if (sp.getString("key", null) != null && sp.getInt("scheme", 0) != SCHEME) forget();
         long next = POLL_MS;
         String host = sp.getString("host", null);
         try {
@@ -345,6 +387,7 @@ final class AgentStatus {
         if (mac.length() > 60) mac = mac.substring(0, 60);
         sp.edit()
                 .putString("key", Base64.encodeToString(key, Base64.NO_WRAP))
+                .putInt("scheme", SCHEME)
                 .putString("device", hex(id))
                 .putString("code", code.toString())
                 .putString("mac", mac)

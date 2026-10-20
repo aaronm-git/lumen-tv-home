@@ -73,15 +73,34 @@ func unhex(_ s: String) -> Data? {
     return out
 }
 
-/** Without control or invisible formatting characters (names and titles end up in logs and the terminal), capped. */
+/**
+ * One line without control or invisible formatting characters (names and titles end up in logs and the terminal),
+ * capped. The cap counts what you see, so it also limits scalars (four per character, enough for most emoji), keeps
+ * at most four combining marks in a row, and reads no further than it needs: one "letter" with thousands of marks
+ * stacked on it would otherwise be huge, and slow.
+ */
 func clean(_ s: String, _ max: Int) -> String {
     var out = String.UnicodeScalarView()
-    for u in s.unicodeScalars {
-        if u.properties.isWhitespace { out.append(" ") }
-        else if u.value == 0x200D || ![.control, .format].contains(u.properties.generalCategory) { out.append(u) }
+    var kept = 0, marks = 0, cut = false
+    for (i, u) in s.unicodeScalars.enumerated() {
+        guard kept < max * 4, i < max * 16 else {
+            cut = true
+            break
+        }
+        let kind = u.properties.generalCategory
+        marks = [.nonspacingMark, .spacingMark, .enclosingMark].contains(kind) ? marks + 1 : 0
+        if marks > 4 { continue }
+        if u.properties.isWhitespace {
+            if out.last != " " { out.append(" ") }
+        } else if u.value == 0x200D || ![.control, .format].contains(kind) {
+            out.append(u)
+        } else {
+            continue
+        }
+        kept += 1
     }
-    let t = String(out)
-    return t.count > max ? String(t.prefix(max - 1)) + "…" : t
+    let t = String(out).trimmingCharacters(in: .whitespaces)
+    return cut || t.count > max ? String(t.prefix(max - 1)) + "…" : t
 }
 
 /** Compares secrets in constant time. */
@@ -103,6 +122,39 @@ func date(_ v: Any?) -> Date? {
 }
 
 // ---- T3 Code ------------------------------------------------------------------------------
+
+/**
+ * Whether pid is T3 Code run by you and listening on port: its own app binary (T3 Code.app/Contents/MacOS/T3 Code,
+ * "(Beta)" too) owning that listening socket. Checked before the token goes anywhere, so another user who takes the
+ * port while T3 Code is stopped gets nothing.
+ */
+func isT3(_ pid: Int32, _ port: Int) -> Bool {
+    var info = proc_bsdinfo()
+    let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+    guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize,
+          info.pbi_uid == getuid(), info.pbi_ruid == getuid() else { return false }
+    var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+    guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
+    let parts = String(cString: path).split(separator: "/").suffix(4).map(String.init)
+    guard parts.count == 4, parts[0] == parts[3] + ".app", parts[1] == "Contents", parts[2] == "MacOS",
+          parts[3].hasPrefix("T3 Code") else { return false }
+    let fdSize = MemoryLayout<proc_fdinfo>.size
+    let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+    guard size > 0 else { return false }
+    var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / fdSize + 16)
+    let got = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, &fds, Int32(fds.count * fdSize))
+    guard got > 0 else { return false }
+    for fd in fds.prefix(Int(got) / fdSize) where fd.proc_fdtype == PROX_FDTYPE_SOCKET {
+        var s = socket_fdinfo()
+        let n = Int32(MemoryLayout<socket_fdinfo>.size)
+        guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDSOCKETINFO, &s, n) == n, s.psi.soi_kind == SOCKINFO_TCP
+        else { continue }
+        let tcp = s.psi.soi_proto.pri_tcp
+        if tcp.tcpsi_state == TSI_S_LISTEN,
+           Int(UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_lport))) == port { return true }
+    }
+    return false
+}
 
 /** The parts of a T3 thread the TV needs. */
 struct Thread {
@@ -202,17 +254,23 @@ final class T3 {
     }
     private var pingTimer: DispatchSourceTimer?
 
-    private var base: URL {
+    /** T3 Code's server, only while the process that wrote server-runtime.json is T3 Code and still listening. */
+    private var base: URL? {
         let runtime = json(try? Data(contentsOf: t3Home.appendingPathComponent("userdata/server-runtime.json")))
-        let p = runtime?["port"] as? Int ?? 3773
-        return URL(string: "http://127.0.0.1:\((1...65535).contains(p) ? p : 3773)")!
+        guard let p = runtime?["port"] as? Int, (1...65535).contains(p), let pid = runtime?["pid"] as? Int,
+              (1..<Int(Int32.max)).contains(pid), isT3(Int32(pid), p) else { return nil }
+        return URL(string: "http://127.0.0.1:\(p)")
     }
 
+    /** Tokens last 30 days, so an older one (a year-long one from before, too) is replaced. */
     private var token: String? {
-        read("t3-token").flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = dir.appendingPathComponent("t3-token")
+        guard let made = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+              Date().timeIntervalSince(made) < 30 * 86_400 else { return nil }
+        return (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func request(_ path: String, _ token: String, post: Bool = false) -> URLRequest {
+    private func request(_ base: URL, _ path: String, _ token: String, post: Bool = false) -> URLRequest {
         var r = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 20)
         r.httpMethod = post ? "POST" : "GET"
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -223,7 +281,11 @@ final class T3 {
     /** Loads every thread over HTTP, then follows changes over the WebSocket from that point. */
     private func connect() {
         guard let token, !token.isEmpty else { return issueToken() }
-        session.dataTask(with: request("api/orchestration/shell", token)) { [self] data, response, error in
+        guard let server = base else {
+            state = "offline"
+            return later()
+        }
+        session.dataTask(with: request(server, "api/orchestration/shell", token)) { [self] data, response, error in
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200, let snap = json(data) else {
                 if code == 401 || code == 403 {
@@ -243,9 +305,10 @@ final class T3 {
     }
 
     private func subscribe(_ token: String) {
-        session.dataTask(with: request("api/auth/websocket-ticket", token, post: true)) { [self] data, _, _ in
-            guard let ticket = json(data)?["ticket"] as? String,
-                  var url = URLComponents(url: base.appendingPathComponent("ws"), resolvingAgainstBaseURL: false)
+        guard let server = base else { return later() }
+        session.dataTask(with: request(server, "api/auth/websocket-ticket", token, post: true)) { [self] data, _, _ in
+            guard let ticket = json(data)?["ticket"] as? String, let server = base,
+                  var url = URLComponents(url: server.appendingPathComponent("ws"), resolvingAgainstBaseURL: false)
             else { return later() }
             url.scheme = "ws"
             url.queryItems = [URLQueryItem(name: "orchestrationProtocol", value: "2"),
@@ -367,7 +430,7 @@ final class T3 {
         log("issuing a read-only T3 Code token")
         let p = Process()
         p.executableURL = cli
-        p.arguments = ["auth", "session", "issue", "--scope", "orchestration:read", "--ttl", "365d",
+        p.arguments = ["auth", "session", "issue", "--scope", "orchestration:read", "--ttl", "30d",
                        "--label", "Lumen TV", "--token-only"]
         let out = Pipe()
         p.standardOutput = out
@@ -422,7 +485,7 @@ final class T3 {
                                        "detail": detail, "project": clean(projects[t.project] ?? "", 80),
                                        "brand": t.brand, "model": clean(t.model, 80)]
             if let at { chat["age"] = Int(max(0, min(now.timeIntervalSince(at), 1e9))) }
-            let s = clean(text?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? "", 280)
+            let s = clean(text ?? "", 280)
             if !s.isEmpty { chat["text"] = s }
             out.append((rank, at ?? now, chat))
         }
@@ -482,17 +545,27 @@ final class Pairing {
         var request: (signed: Data, mac: Data, time: Int64)?
     }
 
+    /** Keys made by this pairing scheme are marked "v": 2; older ones (six-digit codes) are dropped. */
     init() {
+        var old = 0
         for (id, v) in json(read("devices.json")) ?? [:] {
-            guard let d = v as? [String: Any], let k = (d["key"] as? String).flatMap(unhex), k.count == 32 else { continue }
+            guard let d = v as? [String: Any], d["v"] as? Int == 2, let k = (d["key"] as? String).flatMap(unhex),
+                  k.count == 32 else {
+                old += 1
+                continue
+            }
             devices[id] = Device(name: clean(d["name"] as? String ?? "TV", 60), key: SymmetricKey(data: k))
+        }
+        if old > 0 {
+            log("dropped \(old) TV key(s) from an older pairing scheme; those TVs pair again")
+            save()
         }
     }
 
     private func save() {
         var out: [String: Any] = [:]
         for (id, d) in devices {
-            out[id] = ["name": d.name, "key": d.key.withUnsafeBytes { hex($0) }]
+            out[id] = ["v": 2, "name": d.name, "key": d.key.withUnsafeBytes { hex($0) }]
         }
         write("devices.json", encode(out))
     }
@@ -534,6 +607,14 @@ final class Pairing {
         return nil
     }
 
+    /** "Pair again" on the TV: it asks with a request signed by its own key, so it can only remove itself. */
+    func remove(_ id: String) {
+        guard let d = devices.removeValue(forKey: id) else { return }
+        lastTime[id] = nil
+        save()
+        log("\(d.name) forgot its key")
+    }
+
     func forget(_ which: String) -> Int {
         let gone = devices.filter { which == "all" || $0.key == which || $0.value.name == which }.map(\.key)
         for id in gone {
@@ -544,10 +625,10 @@ final class Pairing {
         return gone.count
     }
 
-    enum Check { case ok(SymmetricKey), pending, unknown }
+    enum Check { case ok(String, SymmetricKey), pending, unknown }
 
     /**
-     * X-Lumen-Auth is HMAC(key, "GET <path and query>\n<time>"); times must be recent and only go up, so replays
+     * X-Lumen-Auth is HMAC(key, "<method> <path and query>\n<time>"); times must be recent and only go up, so replays
      * fail. A waiting TV's request can't be checked yet, so it's only kept for approve().
      */
     func check(_ r: Request) -> Check {
@@ -560,9 +641,10 @@ final class Pairing {
         if let d = devices[id] {
             guard HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: signed, using: d.key) else { return .unknown }
             lastTime[id] = t
-            return .ok(d.key)
+            return .ok(id, d.key)
         }
-        guard var p = pending[id], p.expires > Date() else { return .unknown }
+        // Only a status request can be approved later.
+        guard r.method == "GET", r.path == "/status", var p = pending[id], p.expires > Date() else { return .unknown }
         p.request = (signed, mac, t)
         pending[id] = p
         return .pending
@@ -629,6 +711,8 @@ final class Server {
     private var shownKey = ""
     private var waiting: [(c: NWConnection, r: Request, key: SymmetricKey, until: Date)] = []
     private var open = 0
+    /** Open connections by source (see source()). */
+    private var sources: [String: Int] = [:]
     /** The lumen-agents command reads this file (only you can) and sends it with each request. New every start. */
     private let adminSecret = hex(SymmetricKey(size: .bits256).withUnsafeBytes { Array($0) })
 
@@ -691,12 +775,19 @@ final class Server {
     }
 
     private func handle(_ c: NWConnection) {
-        // A few TVs and the command line need a handful; more is a flood.
-        guard open < 64 else { return c.cancel() }
+        // A few TVs and the command line need a handful; more is a flood. Eight per device and 56 from the network,
+        // so the lumen-agents command (loopback, its own eight) still gets in when the network is full.
+        let from = source(c), mine = sources[from] ?? 0
+        guard mine < 8, from == "local" || open - (sources["local"] ?? 0) < 56 else { return c.cancel() }
         open += 1
+        sources[from] = mine + 1
         c.stateUpdateHandler = { [self, weak c] s in
             if case .failed = s { c?.cancel() }
-            if case .cancelled = s { open -= 1 }
+            if case .cancelled = s {
+                open -= 1
+                let left = (sources[from] ?? 1) - 1
+                sources[from] = left > 0 ? left : nil
+            }
         }
         c.start(queue: q)
         var buf = Data()
@@ -723,12 +814,15 @@ final class Server {
         next()
     }
 
-    private func isLocal(_ c: NWConnection) -> Bool {
-        guard case .hostPort(let host, _) = c.endpoint else { return false }
+    /** "local" for loopback, else the address; an IPv6 /64 counts as one device, since it can have many addresses. */
+    private func source(_ c: NWConnection) -> String {
+        guard case .hostPort(let host, _) = c.endpoint else { return "?" }
         switch host {
-        case .ipv4(let a): return a.isLoopback
-        case .ipv6(let a): return a.isLoopback || a.asIPv4?.isLoopback == true
-        default: return false
+        case .ipv4(let a): return a.isLoopback ? "local" : hex(a.rawValue)
+        case .ipv6(let a):
+            if let v4 = a.asIPv4 { return v4.isLoopback ? "local" : hex(v4.rawValue) }
+            return a.isLoopback ? "local" : hex(a.rawValue.prefix(8))
+        default: return "?"
         }
     }
 
@@ -738,7 +832,7 @@ final class Server {
         switch (r.method, r.path) {
         case ("GET", "/status"):
             switch pairing.check(r) {
-            case .ok(let key):
+            case .ok(_, let key):
                 if r.query["wait"] == String(version) && waiting.count < 32 {
                     waiting.append((c, r, key, Date().addingTimeInterval(45)))
                 } else {
@@ -751,6 +845,10 @@ final class Server {
         case ("POST", "/pair"):
             let (code, reply) = pairing.begin(json(r.body) ?? [:])
             send(c, code, reply)
+        case ("POST", "/forget"):
+            guard case .ok(let id, let key) = pairing.check(r) else { return send(c, 401, ["error": "unknown device"]) }
+            pairing.remove(id)
+            sealed(c, 200, encode(["forgot": true]), key, r)
         case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"):
             admin(c, r)
         default:
@@ -763,7 +861,7 @@ final class Server {
      * 127.0.0.1 or localhost (so a web page can't reach it through DNS rebinding).
      */
     private func admin(_ c: NWConnection, _ r: Request) {
-        guard isLocal(c) else { return send(c, 404, ["error": "not found"]) }
+        guard source(c) == "local" else { return send(c, 404, ["error": "not found"]) }
         guard ["127.0.0.1:\(port)", "localhost:\(port)"].contains((r.headers["host"] ?? "").lowercased()),
               same(r.headers["authorization"] ?? "", "Bearer " + adminSecret)
         else { return send(c, 403, ["error": "forbidden"]) }
@@ -782,8 +880,20 @@ final class Server {
         }
     }
 
+    /** At most 64 KB (the TV reads up to 1 MB): without the last messages if needed, then with fewer chats. */
     private func status() -> Data {
-        encode(["v": 1, "version": version, "mac": macName, "t3": t3.state, "chats": t3.state == "ok" ? t3.chats() : []])
+        var chats = t3.state == "ok" ? t3.chats() : []
+        var withText = true
+        while true {
+            let body = encode(["v": 1, "version": version, "mac": macName, "t3": t3.state, "chats": chats])
+            if body.count <= 65_536 || chats.isEmpty { return body }
+            if withText {
+                withText = false
+                chats = chats.map { $0.filter { $0.key != "text" } }
+            } else {
+                chats.removeLast()
+            }
+        }
     }
 
     /**
