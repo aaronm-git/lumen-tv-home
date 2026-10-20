@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lumen</string>
+    <string name="home_key_description">Lets the remote\'s Home button open Lumen instead of the Google TV home screen. Lumen does not read or collect anything on screen.</string>
+</resources>
