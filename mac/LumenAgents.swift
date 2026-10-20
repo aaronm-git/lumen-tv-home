@@ -299,7 +299,6 @@ final class T3 {
             applySnapshot(snap)
             state = "ok"
             onChange?()
-            retry = 1
             subscribe(token)
         }.resume()
     }
@@ -343,6 +342,8 @@ final class T3 {
                 guard let msg = json(data) else { return receive(task) }
                 switch msg["_tag"] as? String {
                 case "Chunk":
+                    // The subscription works, so the next failure starts the backoff over.
+                    retry = 1
                     for v in msg["values"] as? [[String: Any]] ?? [] { apply(v) }
                     onChange?()
                     // The server waits for an Ack before it sends the next chunk.
@@ -536,12 +537,15 @@ final class Pairing {
      */
     private var pending: [String: Pending] = [:]
     private var lastTime: [String: Int64] = [:]
-    private var pairTimes: [Date] = []
+    /** Recent /pair requests by source (see Server.source()). */
+    private var pairTimes: [String: [Date]] = [:]
 
     struct Pending {
-        let name: String
+        let name, source: String
         let secret, tvKey, macKey: Data
-        let expires: Date
+        let made, expires: Date
+        /** When the TV last sent a signed /status: it does every few seconds while it shows the code. */
+        var seen: Date
         var request: (signed: Data, mac: Data, time: Int64)?
     }
 
@@ -570,13 +574,22 @@ final class Pairing {
         write("devices.json", encode(out))
     }
 
-    /** Agrees a secret with the TV (P-256 ECDH). Ten tries a minute and eight waiting TVs at most. */
-    func begin(_ body: [String: Any]) -> (Int, [String: Any]) {
+    /**
+     * Agrees a secret with the TV (P-256 ECDH). Ten tries a minute per source and 120 in all. Each source keeps its
+     * two newest requests, and when 64 are waiting the one that has gone quiet longest makes room, so blocking a real
+     * TV takes many addresses that all keep polling.
+     */
+    func begin(_ body: [String: Any], from: String) -> (Int, [String: Any]) {
         let now = Date()
-        pairTimes = pairTimes.filter { now.timeIntervalSince($0) < 60 }
+        pairTimes = pairTimes.compactMapValues { times in
+            let recent = times.filter { now.timeIntervalSince($0) < 60 }
+            return recent.isEmpty ? nil : recent
+        }
         pending = pending.filter { $0.value.expires > now }
-        guard pairTimes.count < 10, pending.count < 8 else { return (429, ["error": "busy"]) }
-        pairTimes.append(now)
+        guard (pairTimes[from]?.count ?? 0) < 10, pairTimes.values.joined().count < 120 else {
+            return (429, ["error": "busy"])
+        }
+        pairTimes[from, default: []].append(now)
         guard let b64 = body["key"] as? String, b64.count < 400, let der = Data(base64Encoded: b64),
               let tvKey = try? P256.KeyAgreement.PublicKey(derRepresentation: der) else { return (400, ["error": "bad key"]) }
         let mine = P256.KeyAgreement.PrivateKey()
@@ -584,8 +597,12 @@ final class Pairing {
         let id = hex(SHA256.hash(data: der).prefix(8))
         guard pending[id] == nil, devices[id] == nil else { return (400, ["error": "bad key"]) }
         let name = clean(body["name"] as? String ?? "TV", 60)
-        pending[id] = Pending(name: name, secret: shared.withUnsafeBytes { Data($0) }, tvKey: der,
-                              macKey: mine.publicKey.derRepresentation, expires: now.addingTimeInterval(900))
+        let theirs = pending.filter { $0.value.source == from }
+        if theirs.count >= 2, let oldest = theirs.min(by: { $0.value.made < $1.value.made }) { pending[oldest.key] = nil }
+        if pending.count >= 64, let quiet = pending.min(by: { $0.value.seen < $1.value.seen }) { pending[quiet.key] = nil }
+        pending[id] = Pending(name: name, source: from, secret: shared.withUnsafeBytes { Data($0) }, tvKey: der,
+                              macKey: mine.publicKey.derRepresentation, made: now,
+                              expires: now.addingTimeInterval(900), seen: now)
         log("pairing requested by \(name)")
         return (200, ["key": mine.publicKey.derRepresentation.base64EncodedString(), "mac": macName])
     }
@@ -615,14 +632,15 @@ final class Pairing {
         log("\(d.name) forgot its key")
     }
 
-    func forget(_ which: String) -> Int {
+    /** Returns the ids it removed. */
+    func forget(_ which: String) -> [String] {
         let gone = devices.filter { which == "all" || $0.key == which || $0.value.name == which }.map(\.key)
         for id in gone {
             devices[id] = nil
             lastTime[id] = nil
         }
         save()
-        return gone.count
+        return gone
     }
 
     enum Check { case ok(String, SymmetricKey), pending, unknown }
@@ -646,6 +664,7 @@ final class Pairing {
         // Only a status request can be approved later.
         guard r.method == "GET", r.path == "/status", var p = pending[id], p.expires > Date() else { return .unknown }
         p.request = (signed, mac, t)
+        p.seen = Date()
         pending[id] = p
         return .pending
     }
@@ -709,7 +728,7 @@ final class Server {
      */
     private var version = Int.random(in: 1..<1_000_000)
     private var shownKey = ""
-    private var waiting: [(c: NWConnection, r: Request, key: SymmetricKey, until: Date)] = []
+    private var waiting: [(c: NWConnection, r: Request, id: String, key: SymmetricKey, until: Date)] = []
     private var open = 0
     /** Open connections by source (see source()). */
     private var sources: [String: Int] = [:]
@@ -749,6 +768,12 @@ final class Server {
         let due = waiting.filter { $0.until > now && $0.r.query["wait"] == String(version) }
         for w in waiting where !due.contains(where: { $0.c === w.c }) { sealed(w.c, 200, status(), w.key, w.r) }
         waiting = due
+    }
+
+    /** A removed TV's waiting requests are closed without a reply, so its old key gets nothing more. */
+    private func drop(_ ids: [String]) {
+        for w in waiting where ids.contains(w.id) { w.c.cancel() }
+        waiting.removeAll { ids.contains($0.id) }
     }
 
     private func listen() {
@@ -814,14 +839,14 @@ final class Server {
         next()
     }
 
-    /** "local" for loopback, else the address; an IPv6 /64 counts as one device, since it can have many addresses. */
+    /** "local" for loopback, else the address (IPv4-mapped IPv6 as IPv4). */
     private func source(_ c: NWConnection) -> String {
         guard case .hostPort(let host, _) = c.endpoint else { return "?" }
         switch host {
         case .ipv4(let a): return a.isLoopback ? "local" : hex(a.rawValue)
         case .ipv6(let a):
             if let v4 = a.asIPv4 { return v4.isLoopback ? "local" : hex(v4.rawValue) }
-            return a.isLoopback ? "local" : hex(a.rawValue.prefix(8))
+            return a.isLoopback ? "local" : hex(a.rawValue)
         default: return "?"
         }
     }
@@ -832,9 +857,9 @@ final class Server {
         switch (r.method, r.path) {
         case ("GET", "/status"):
             switch pairing.check(r) {
-            case .ok(_, let key):
+            case .ok(let id, let key):
                 if r.query["wait"] == String(version) && waiting.count < 32 {
-                    waiting.append((c, r, key, Date().addingTimeInterval(45)))
+                    waiting.append((c, r, id, key, Date().addingTimeInterval(45)))
                 } else {
                     sealed(c, 200, status(), key, r)
                 }
@@ -843,11 +868,12 @@ final class Server {
             case .unknown: send(c, 401, ["error": "unknown device"])
             }
         case ("POST", "/pair"):
-            let (code, reply) = pairing.begin(json(r.body) ?? [:])
+            let (code, reply) = pairing.begin(json(r.body) ?? [:], from: source(c))
             send(c, code, reply)
         case ("POST", "/forget"):
             guard case .ok(let id, let key) = pairing.check(r) else { return send(c, 401, ["error": "unknown device"]) }
             pairing.remove(id)
+            drop([id])
             sealed(c, 200, encode(["forgot": true]), key, r)
         case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"):
             admin(c, r)
@@ -872,7 +898,9 @@ final class Server {
         case ("GET", "/devices"):
             send(c, 200, ["devices": pairing.devices.map { ["id": $0.key, "name": $0.value.name] }])
         case ("POST", "/unpair"):
-            send(c, 200, ["removed": pairing.forget(String(decoding: r.body, as: UTF8.self))])
+            let gone = pairing.forget(String(decoding: r.body, as: UTF8.self))
+            drop(gone)
+            send(c, 200, ["removed": gone.count])
         case ("GET", "/debug"):
             send(c, 200, encode(["t3": t3.state, "threads": t3.threads.count, "chats": t3.chats()]))
         default:
