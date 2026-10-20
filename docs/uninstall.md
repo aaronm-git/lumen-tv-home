@@ -65,6 +65,8 @@ Choose whether to retain the helper's data. Neither option revokes the T3 Code s
 
 ## Revoke the T3 Code session
 
+These commands and their output were verified with T3 Code (Beta) 0.1.0.
+
 1. On your Mac, list T3 Code sessions:
 
    ```sh
@@ -73,14 +75,16 @@ Choose whether to retain the helper's data. Neither option revokes the T3 Code s
 
    For a custom *`T3CODE_HOME`*, use that directory's *`bin/t3`* instead.
 
-2. In the session list, find the entry labeled **Lumen TV** and note its ID. If there are multiple **Lumen TV** sessions from renewals or reinstalls, repeat revocation for each you want to remove.
+2. In the session list, find the block with *`client: Lumen TV | bot`*. Each block starts with the session ID on its own line, followed by metadata such as *`client:`*, *`issued:`*, and *`expires:`*. Note the ID from the first line. If there are multiple **Lumen TV** sessions from renewals or reinstalls, repeat revocation for each you want to remove.
 3. On your Mac, revoke the session:
 
    ```sh
    ~/.t3/bin/t3 auth session revoke SESSION_ID
    ```
 
-   Replace *`SESSION_ID`* with the ID from the session list. You can also revoke **Lumen TV** through T3 Code's connections UI.
+   Replace *`SESSION_ID`* with the ID from the session list. A successful revocation prints *`Revoked session SESSION_ID.`*, with your session ID in place of *`SESSION_ID`*.
+
+The session may also appear in T3 Code's connected clients list, if present.
 
 ## Verify removal
 

@@ -12,11 +12,13 @@ Lumen Agents is an unofficial integration with T3 Code and is not affiliated wit
 
 ## Report a vulnerability
 
-Report vulnerabilities privately through GitHub's private vulnerability reporting. Don't open a public issue.
+Report vulnerabilities through GitHub's private vulnerability reporting. The maintainer must enable this feature and will enable it when the repository is published.
 
 1. On the repository's GitHub page, select **Security**.
 2. On the **Security** tab, select **Report a vulnerability**.
 3. In the private report, include the versions and device details listed above, steps to reproduce, and redacted relevant logs.
+
+If **Report a vulnerability** isn't available, open a minimal public issue asking for a private contact. Don't include vulnerability details in the public issue.
 
 ## Supported versions
 
@@ -26,7 +28,7 @@ Only the latest version on the default branch is supported. There are no officia
 
 ### Pairing
 
-The TV generates a random 16-character code (80 bits) and displays it. The code never travels over the network. The TV and Mac agree on a secret using P-256 ECDH and derive the pairing key from the secret, the code, and both public keys.
+The TV generates a random 16-character code (80 bits) and displays it. The code isn't sent between the TV and the Mac. The *`lumen-agents`* command submits it to the helper over the Mac's loopback interface at 127.0.0.1. The TV and Mac agree on a secret using P-256 ECDH and derive the pairing key from the secret, the code, and both public keys.
 
 Until you enter the code on the Mac with *`lumen-agents pair`*, the Mac answers signed status requests with *`pending`*. Entering the code lets the Mac verify the TV's latest signed request. A device between the TV and Mac sees the public keys but not the code, so it shouldn't be able to derive the key or guess the code in practice.
 
@@ -73,7 +75,7 @@ The helper caps connection counts per source and in total, rate-limits pairing r
 
 ## Review status
 
-The pairing, helper server, and TV client underwent an AI-assisted code security review before release, and the issues found in that review were fixed. This was a scoped review, not an audit or certification. Treat Lumen as experimental software.
+The pairing, helper server, and TV client underwent AI-assisted security reviews during development. The findings were fixed. These reviews weren't an audit or certification. Treat Lumen as experimental software.
 
 ## Diagnostic logs
 

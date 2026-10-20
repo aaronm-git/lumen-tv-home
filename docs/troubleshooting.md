@@ -102,7 +102,7 @@ Other Android TV launchers are untested. The fallback window-event handler recog
 3. In a streaming app that publishes a media session with a title, play a show or movie for at least 20 seconds. The recorder saves progress every 30 seconds and on pause.
 4. On the remote, press **Home** to check the row.
 
-Lumen doesn't import Google TV history. Music, casting, and Live TV are excluded. Turning **Continue watching** off stops recording and updates without deleting existing entries. Clearing history or uninstalling removes the entries; they can't be recovered from Google TV.
+Lumen doesn't import Google TV history. Lumen excludes selected music, casting, and live-TV apps. Other apps that publish media sessions can appear in watch history. Turning **Continue watching** off stops recording and updates without deleting existing entries. Clearing history or uninstalling removes the entries; they can't be recovered from Google TV.
 
 ## Mac offline
 

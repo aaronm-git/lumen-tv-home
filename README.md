@@ -10,13 +10,13 @@ Lumen is a personal project, currently version 0.1.0, available only as source. 
 
 - See a clock, date, and greeting, including holiday greetings.
 - Use **Now playing** to see artwork, a title, and the app for playing or paused media. Select its play/pause button to control playback, or press **OK** on the card to open the player. The card hides when nothing is playing or paused.
-- Return to the latest 10 shows and movies in **Continue watching**, with artwork, episode information, and progress. Lumen builds its own history as you watch; it can't read Google TV's list. Music, casting, and Live TV are excluded. Home focuses this row when it has shows.
+- Return to the latest 10 shows and movies in **Continue watching**, with artwork, episode information, and progress. Lumen builds its own history as you watch; it can't read Google TV's list. Lumen excludes selected music, casting, and live-TV apps. Other apps that publish media sessions can appear in watch history. Home focuses this row when it has shows.
 - Choose **Settings > Rows** for separate favorites and app rows, or **Settings > Grid** for apps five across.
 - Find installed TV apps automatically with their own banners. Press and hold **OK** on an app for favorite, move, hide, and app-information options. See [Customize your home screen](docs/quickstart.md#customize-your-home-screen) for the available actions.
 - Select **Inputs** to see HDMI ports, connected-device names from HDMI-CEC, and connection status.
 - See the background color change with the focused app.
 - Optionally show T3 Code chat status and notifications from your Mac. Both features start off on new installs. See [Set up Lumen Agents](docs/set-up-agents.md#before-you-begin).
-- Use Lumen without analytics or tracking. The app uses about 50 MB of memory on the tested TV.
+- Use Lumen without analytics or tracking. The app uses about 50 MB of memory (measured with `dumpsys meminfo` on the tested TV).
 
 Lumen uses the Android framework without libraries or Gradle.
 

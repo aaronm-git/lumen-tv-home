@@ -18,7 +18,7 @@ You need:
 - Your Mac and TV on the same trusted local network. Guest or isolated Wi-Fi can prevent discovery and connections. Don't forward helper port 47837 from your router to the internet.
 - [Lumen installed on your TV](quickstart.md#before-you-begin) and the source directory on your Mac.
 
-The helper build is verified on macOS 27.0 (build 26A428) with Apple Swift 6.4 (swiftlang-6.4.0.34.1), targeting arm64. These are the tested build-tool versions, not minimum supported versions or verification of TV pairing. The installer compiles in Swift 5 language mode.
+The verified OS and compiler versions are macOS 27.0 (build 26A428) and Apple Swift 6.4 (swiftlang-6.4.0.34.1), targeting arm64. These versions come from *`sw_vers`* and *`swiftc --version`* and aren't minimum supported versions. The installer compiles in Swift 5 language mode.
 
 1. On the Mac, verify the OS and compiler:
 
@@ -141,7 +141,7 @@ The helper advertises *`_lumen-agents._tcp`* over Bonjour, normally on port 4783
 
 The helper issues its own read-only *`orchestration:read`* T3 Code token, labeled **Lumen TV**, with a 30-day lifetime and automatic renewal. Before sending the token to T3 Code's local server, it checks that the process in *`userdata/server-runtime.json`* runs as your user, is an app binary whose name starts with **T3 Code**, and owns the listening socket. This accepts regular and Beta app bundles wherever installed; it doesn't cryptographically authenticate T3 Code.
 
-The TV generates a random pairing code that never travels over the network. The TV and Mac combine the code with a P-256 ECDH shared secret and both public keys to derive a pairing key. Paired requests are signed with HMAC-SHA256; replies are encrypted and authenticated with AES-GCM and bound to the request time.
+The TV generates a random pairing code. The code isn't sent between the TV and the Mac. The *`lumen-agents`* command submits it to the helper over the Mac's loopback interface at 127.0.0.1. The TV and Mac combine the code with a P-256 ECDH shared secret and both public keys to derive a pairing key. Paired requests are signed with HMAC-SHA256; replies are encrypted and authenticated with AES-GCM and bound to the request time.
 
 Bonjour exposes your Mac's name and helper port. The TV's model name, the existence, timing, and size of network traffic, and anything visible on the TV aren't confidential. For pairing floods, replay after a helper restart, local connection exhaustion, the listener-check race, shared directional keys, and other limitations, read [Known limitations and accepted risks](../SECURITY.md#known-limitations-and-accepted-risks).
 

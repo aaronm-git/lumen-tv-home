@@ -14,7 +14,7 @@ Lumen has no analytics, tracking, ads, or accounts. It sends nothing to its auth
 
 ### Watch history
 
-To build **Continue watching**, Lumen records titles, episode information, app, playback progress, and a small thumbnail per show. It retains the last 20 shows and displays the latest 10. Music, casting, and Live TV aren't recorded.
+To build **Continue watching**, Lumen records titles, episode information, app, playback progress, and a small thumbnail per show. It retains the last 20 shows and displays the latest 10. Lumen excludes selected music, casting, and live-TV apps. Other apps that publish media sessions can appear in watch history.
 
 History stays in Lumen's private app storage on the TV, which other apps can't read. The history file is *`watch-history.json`*, with thumbnails in *`art/`*.
 
@@ -77,7 +77,7 @@ The helper advertises your Mac's name over Bonjour. See [Information that isn't 
 - On the TV, clearing Lumen's storage or uninstalling it removes all Lumen data there. Clearing only watch history leaves settings and pairing data intact.
 - On the Mac, *`./mac/install.sh uninstall`* stops and removes the helper but keeps its token, pairings, helper ID, admin secret, and log.
 - On the Mac, *`./mac/install.sh purge`* also deletes the entire Lumen Agents application-support directory and its log.
-- Purging doesn't revoke T3 Code's session record. Revoke **Lumen TV** in T3 Code's connections UI, or list and revoke its session with T3 Code's CLI.
+- Purging doesn't revoke T3 Code's session record. List and revoke the **Lumen TV** session with T3 Code's CLI.
 
 Follow [Remove Lumen](docs/uninstall.md#before-you-begin) for ordered steps and the commands to revoke the session.
 

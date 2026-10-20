@@ -17,6 +17,11 @@ You need:
 - A computer and TV on the same trusted network, with network debugging available on the TV.
 - Git, JDK 17, Android SDK Command-Line Tools, `openssl`, and `zip`. The Mac-only Agents helper is optional.
 
+If you don't have the JDK or SDK tools, install them:
+
+- Install [Temurin JDK 17](https://adoptium.net/temurin/releases/?version=17) for your computer. On macOS with Homebrew, use `brew install --cask temurin@17`, the [Temurin 17 cask](https://formulae.brew.sh/cask/temurin@17). Run `/usr/libexec/java_home -v 17` to find its home directory for *`JAVA_HOME`*.
+- Download and extract [Android SDK Command-Line Tools](https://developer.android.com/studio#command-line-tools-only) for your computer. Choose an SDK directory for *`ANDROID_HOME`*. Create *`cmdline-tools/latest`* inside it. Move the extracted *`cmdline-tools`* contents into *`latest`*, including *`bin`*, *`lib`*, *`NOTICE.txt`*, and *`source.properties`*. The executable must be at *`$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager`*. See Google's [directory setup instructions](https://developer.android.com/tools/sdkmanager).
+
 Complete these checks before connecting to the TV:
 
 1. In your computer's shell, set the SDK and JDK locations and add their tools to `PATH`:
@@ -48,15 +53,15 @@ Complete these checks before connecting to the TV:
 4. In the same shell, verify the compiler and build tools:
 
    ```sh
-   javac -version
-   test -f "$ANDROID_HOME/platforms/android-34/android.jar"
-   test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
-   test -x "$ANDROID_HOME/build-tools/36.0.0/d8"
-   test -x "$ANDROID_HOME/build-tools/36.0.0/zipalign"
-   test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+   javac -version || echo "missing: javac in PATH"
+   test -f "$ANDROID_HOME/platforms/android-34/android.jar" && echo "OK: android.jar" || echo "missing: $ANDROID_HOME/platforms/android-34/android.jar"
+   test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" && echo "OK: aapt2" || echo "missing or not executable: $ANDROID_HOME/build-tools/36.0.0/aapt2"
+   test -x "$ANDROID_HOME/build-tools/36.0.0/d8" && echo "OK: d8" || echo "missing or not executable: $ANDROID_HOME/build-tools/36.0.0/d8"
+   test -x "$ANDROID_HOME/build-tools/36.0.0/zipalign" && echo "OK: zipalign" || echo "missing or not executable: $ANDROID_HOME/build-tools/36.0.0/zipalign"
+   test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && echo "OK: apksigner" || echo "missing or not executable: $ANDROID_HOME/build-tools/36.0.0/apksigner"
    ```
 
-   Verify that *`javac`* reports version 17. Each *`test`* command must exit successfully; it prints nothing on success. See [Build tools are missing](troubleshooting.md#build-tools-are-missing) if a check fails.
+   Verify that *`javac`* reports version 17 and every other line reports **OK**. Resolve any **missing** result before continuing. See [Build tools are missing](troubleshooting.md#build-tools-are-missing) if a check fails.
 
 ## Get the source
 
@@ -120,6 +125,8 @@ Run the remaining repository scripts from this directory.
 
    Wait for installation to complete before continuing.
 
+3. On the TV, open **Lumen** from the installed-app list. Its home screen opens.
+
 ## Allow media access
 
 Android shares active media sessions with notification listeners. Lumen uses this access for **Now playing** and to record **Continue watching**. It ignores notification contents, but Android grants listeners the ability to read them. See [TV permissions](../PRIVACY.md#tv-data-and-permissions).
@@ -156,13 +163,12 @@ Lumen uses an accessibility service to intercept **Home** and redirect the Googl
 
 ## Verify setup
 
-1. On the TV, select **Lumen** in the installed-app list. Its home screen opens.
-2. On the remote, press **Home**. Lumen opens again.
-3. In a streaming app that publishes media sessions, play a show or movie for at least 20 seconds.
-4. On the remote, press **Home**. **Now playing** shows the playing or paused media, and **Continue watching** includes the show.
+1. On the remote, press **Home**. Lumen opens.
+2. In a streaming app that publishes media sessions, play a show or movie for at least 20 seconds.
+3. On the remote, press **Home**. **Now playing** shows the playing or paused media, and **Continue watching** includes the show.
 
 > [!NOTE]
-> An empty **Continue watching** row at first is expected. Lumen records your viewing from this point forward; it doesn't import Google TV's history. Music, casting, and Live TV aren't recorded, and media-session support varies by app.
+> An empty **Continue watching** row at first is expected. Lumen records your viewing from this point forward; it doesn't import Google TV's history. Lumen excludes selected music, casting, and live-TV apps. Other apps that publish media sessions can appear in watch history.
 
 ## Customize your home screen
 
