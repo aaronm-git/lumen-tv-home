@@ -50,6 +50,7 @@ Lumen Agents is an unofficial integration with T3 Code and is not affiliated wit
 
 Before you run a setup procedure, check its **Before you begin** section.
 
+- [Set up Lumen with your AI coding agent](docs/ai-agent-setup.md) (recommended).
 - [Build and install Lumen](docs/quickstart.md#before-you-begin).
 - [Pair Lumen with your Mac](docs/set-up-agents.md#before-you-begin).
 - [Diagnose setup and runtime problems](docs/troubleshooting.md#before-you-begin).
