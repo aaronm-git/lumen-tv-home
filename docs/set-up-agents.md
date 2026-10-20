@@ -163,13 +163,13 @@ Revoking the **Lumen TV** session cuts off chat data to every paired TV. To keep
    lumen-agents authorize
    ```
 
-T3 Code gives the same answer for a revoked session as for an expired one, so the helper handles both the same way. Sessions last 30 days, so you run *`lumen-agents authorize`* about once a month. A short drop, such as T3 Code restarting, isn't a rejection: the TV shows **T3 Code isn't running** with no chats, and the helper reconnects with the same session.
+T3 Code gives the same answer for a revoked session as for an expired one, so the helper handles both the same way. Sessions last a year, so you run *`lumen-agents authorize`* about once a year. A session from an earlier version of the helper keeps its 30-day lifetime: after you update the helper, run *`lumen-agents authorize`* once to get one that lasts a year. A short drop, such as T3 Code restarting, isn't a rejection: the TV shows **T3 Code isn't running** with no chats, and the helper reconnects with the same session.
 
 ## How it works
 
 The helper advertises *`_lumen-agents._tcp`* over Bonjour, normally on port 47837. Lumen discovers it and follows its address changes. The TV keeps a long-poll request open; the helper replies when chat status changes or the wait expires. The helper follows T3 Code's update stream rather than repeatedly fetching the chat list.
 
-The helper uses a read-only *`orchestration:read`* T3 Code token, labeled **Lumen TV**, with a 30-day lifetime. Only *`lumen-agents authorize`* creates one. Before sending the token to T3 Code's local server, it checks that the process in *`userdata/server-runtime.json`* runs as your user, is an app binary whose name starts with **T3 Code**, and owns the listening socket. This accepts regular and Beta app bundles wherever installed; it doesn't cryptographically authenticate T3 Code.
+The helper uses a read-only *`orchestration:read`* T3 Code token, labeled **Lumen TV**, with a one-year lifetime. Only *`lumen-agents authorize`* creates one. Before sending the token to T3 Code's local server, it checks that the process in *`userdata/server-runtime.json`* runs as your user, is an app binary whose name starts with **T3 Code**, and owns the listening socket. This accepts regular and Beta app bundles wherever installed; it doesn't cryptographically authenticate T3 Code.
 
 The TV generates a random pairing code. The code isn't sent between the TV and the Mac. The *`lumen-agents`* command submits it to the helper over the Mac's loopback interface at 127.0.0.1. The TV and Mac combine the code with a P-256 ECDH shared secret and both public keys to derive a pairing key. Paired requests are signed with HMAC-SHA256; replies are encrypted and authenticated with AES-GCM and bound to the request time.
 

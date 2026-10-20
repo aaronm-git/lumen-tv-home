@@ -48,9 +48,9 @@ A TV whose key the Mac no longer accepts shows **Mac offline** and keeps its key
 
 ### T3 Code token and listener check
 
-The helper uses its own read-only T3 Code token with scope *`orchestration:read`*, stored readable only by your user account. T3 Code's *`t3`* command issues the token for 30 days, and only when you run *`lumen-agents authorize`*. The helper never creates a token by itself, including on first start or when the token file is missing.
+The helper uses its own read-only T3 Code token with scope *`orchestration:read`*, stored readable only by your user account. T3 Code's *`t3`* command issues the token for one year, and only when you run *`lumen-agents authorize`*. The helper never creates a token by itself, including on first start or when the token file is missing.
 
-When T3 Code rejects the token with HTTP 401 or 403, the helper fails closed: it drops the chats it holds, ignores replies to requests made before the rejection, tells waiting TVs, deletes the token, and saves a *`t3-blocked`* marker. It then stays off across restarts until you run *`lumen-agents authorize`* again. T3 Code returns the same response for revoked and expired sessions, so both need you to authorize again. A token older than 30 days isn't used. When T3 Code is unreachable or its update stream drops, the helper also clears the chats, but it retries with the same token, which T3 Code still checks on every reconnect.
+When T3 Code rejects the token with HTTP 401 or 403, the helper fails closed: it drops the chats it holds, ignores replies to requests made before the rejection, tells waiting TVs, deletes the token, and saves a *`t3-blocked`* marker. It then stays off across restarts until you run *`lumen-agents authorize`* again. T3 Code returns the same response for revoked and expired sessions, so both need you to authorize again. A token older than a year isn't used. When T3 Code is unreachable or its update stream drops, the helper also clears the chats, but it retries with the same token, which T3 Code still checks on every reconnect.
 
 Revoking the **Lumen TV** session cuts off chat data to every paired TV. Unpairing one TV affects only that TV. See [Revoke or allow T3 Code access](docs/set-up-agents.md#revoke-or-allow-t3-code-access).
 

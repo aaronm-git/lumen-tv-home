@@ -288,15 +288,15 @@ final class T3 {
     }
 
     /**
-     * The token from `lumen-agents authorize`, unless T3 Code rejected it. Tokens last 30 days, so an older one (a
-     * year-long one from before, too) isn't used. None of these are replaced on their own: T3 Code says the same
-     * thing for a revoked token as for an expired one, so a new one only comes from you running authorize.
+     * The token from `lumen-agents authorize`, unless T3 Code rejected it. Tokens last a year, so an older one isn't
+     * used. None of these are replaced on their own: T3 Code says the same thing for a revoked token as for an
+     * expired one, so a new one only comes from you running authorize.
      */
     private var token: String? {
         let url = dir.appendingPathComponent("t3-token")
         guard !rejected, read("t3-blocked") == nil,
               let made = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
-              Date().timeIntervalSince(made) < 30 * 86_400 else { return nil }
+              Date().timeIntervalSince(made) < 365 * 86_400 else { return nil }
         let t = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         return t?.isEmpty == false ? t : nil
     }
@@ -506,7 +506,7 @@ final class T3 {
         log("issuing a read-only T3 Code token")
         let p = Process()
         p.executableURL = cli
-        p.arguments = ["auth", "session", "issue", "--scope", "orchestration:read", "--ttl", "30d",
+        p.arguments = ["auth", "session", "issue", "--scope", "orchestration:read", "--ttl", "365d",
                        "--label", "Lumen TV", "--token-only"]
         let out = Pipe()
         p.standardOutput = out

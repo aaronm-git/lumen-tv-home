@@ -12,7 +12,7 @@ short notification when one needs me. It's been really handy for keeping an eye 
 I'd like to publish it (MIT licensed) without stepping on your toes.
 
 How it works today: a small helper on the Mac issues its own read-only session with
-`t3 auth session issue --scope orchestration:read` (labelled "Lumen TV", 30-day TTL, issued only when the user runs `lumen-agents authorize`; once your server
+`t3 auth session issue --scope orchestration:read` (labelled "Lumen TV", one-year TTL, issued only when the user runs `lumen-agents authorize`; once your server
 rejects it, the helper stops until the user authorizes again), reads
 `server-runtime.json` to find the local server, loads `/api/orchestration/shell` and follows the shell stream
 (`x-t3-orchestration-protocol: 2`). Apart from issuing its own session it only reads, and it checks that the listening process is the

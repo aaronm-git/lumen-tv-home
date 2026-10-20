@@ -261,6 +261,7 @@ var r = command("authorize")
 check(r.status == 0, "it succeeds")
 check(issued == 1, "exactly one token is issued")
 check(file(control.appendingPathComponent("args")).contains("--scope orchestration:read"), "read-only scope")
+check(file(control.appendingPathComponent("args")).contains("--ttl 365d"), "lasting a year")
 check(until(5) { tv.titles == ["Fresh chat"] && tv.t3 == "ok" }, "the TV gets the chats")
 
 print("T3 Code drops the stream and isn't ready for a moment")
@@ -333,6 +334,27 @@ r = command("authorize")
 check(r.status == 0 && issued == 3, "lumen-agents authorize issues a new token")
 check(until(5) { tv.t3 == "ok" && tv.titles == ["Fresh chat"] }, "and the TV gets chats again")
 check(!fm.fileExists(atPath: agentsDir.appendingPathComponent("t3-blocked").path), "t3-blocked is cleared")
+
+print("An old token")
+// Backdates the token file, which is how the helper tells its age.
+func age(_ days: Double) {
+    try! fm.setAttributes([.modificationDate: Date().addingTimeInterval(-days * 86_400)],
+                          ofItemAtPath: agentsDir.appendingPathComponent("t3-token").path)
+}
+age(31)
+stopHelper()
+startHelper()
+check(until(10) { tv.t3 == "ok" && tv.titles == ["Fresh chat"] }, "one older than 30 days is still used")
+age(366)
+stopHelper()
+startHelper()
+check(until(5) { tv.t3 == "auth" }, "one older than a year isn't")
+Thread.sleep(forTimeInterval: 2)
+check(issued == 3, "and no new token is issued")
+check(tv.titles.isEmpty, "no chats")
+r = command("authorize")
+check(r.status == 0 && issued == 4, "lumen-agents authorize issues a new token")
+check(until(5) { tv.t3 == "ok" && tv.titles == ["Fresh chat"] }, "and the TV gets chats again")
 
 print("Unpairing one of two TVs")
 let other = TV()
