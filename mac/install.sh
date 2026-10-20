@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 APP="$HOME/Library/Application Support/Lumen Agents"
 BIN="$APP/lumen-agents"
 PLIST="$HOME/Library/LaunchAgents/local.lumen.agents.plist"
+LOG="$HOME/Library/Logs/lumen-agents.log"
 DOMAIN="gui/$(id -u)"
 
 launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
@@ -16,8 +17,12 @@ if [ "${1:-}" = uninstall ]; then
     exit 0
 fi
 
-mkdir -p "$APP" "$HOME/Library/LaunchAgents" "$HOME/.local/bin"
+mkdir -p "$APP" "$HOME/Library/LaunchAgents" "$HOME/.local/bin" "$HOME/Library/Logs"
 chmod 700 "$APP"
+# Token, keys and log are for your eyes only.
+find "$APP" -maxdepth 1 -type f ! -name lumen-agents -exec chmod 600 {} +
+touch "$LOG"
+chmod 600 "$LOG"
 swiftc -O -swift-version 5 -o "$BIN" LumenAgents.swift
 ln -sf "$BIN" "$HOME/.local/bin/lumen-agents"
 
@@ -33,7 +38,8 @@ cat > "$PLIST" <<PLIST
     <key>ThrottleInterval</key><integer>30</integer>
     <key>Nice</key><integer>5</integer>
     <key>LowPriorityIO</key><true/>
-    <key>StandardErrorPath</key><string>$HOME/Library/Logs/lumen-agents.log</string>
+    <key>Umask</key><integer>63</integer>
+    <key>StandardErrorPath</key><string>$LOG</string>
 </dict>
 </plist>
 PLIST

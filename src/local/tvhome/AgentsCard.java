@@ -59,12 +59,13 @@ final class AgentsCard extends LinearLayout {
         } else if (s.phase == AgentStatus.OFFLINE) {
             head = "AGENTS";
             lines.add(new Line("offline", "Mac offline", "", 0x66FFFFFF, null,
-                    "Lumen can't reach Lumen Agents on " + s.mac));
+                    "Can't reach Lumen Agents on " + s.mac + ". Unpaired it? Settings › Pair again"));
         } else if (s.phase == AgentStatus.PAIRING) {
             head = "AGENTS  ·  PAIR WITH " + s.mac.toUpperCase(Locale.ROOT);
-            String code = s.code == null || s.code.length() != 6 ? s.code : s.code.substring(0, 3) + " " + s.code.substring(3);
-            lines.add(new Line("pair", code, "On the Mac:  lumen-agents pair " + s.code, 0xFFFFFFFF, null,
-                    "Pair with " + s.mac + ": run  lumen-agents pair " + s.code + "  in Terminal"));
+            // Focused, the hero shows the code large, with the command under it.
+            String code = AgentStatus.grouped(s.code);
+            lines.add(new Line("pair", code, "Type on the Mac", 0xFFFFFFFF, null,
+                    "On the Mac:  lumen-agents pair " + code));
         } else if (!"ok".equals(s.t3)) {
             head = "AGENTS";
             lines.add(new Line("t3", "offline".equals(s.t3) ? "T3 Code isn't running" : "T3 Code needs a new token",

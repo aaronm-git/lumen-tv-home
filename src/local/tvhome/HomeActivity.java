@@ -768,6 +768,9 @@ public class HomeActivity extends Activity {
             prefs.agentAlerts = !prefs.agentAlerts;
             prefs.save();
         });
+        if (prefs.showAgents) {
+            s.add("Pair again", "Forget the key and show a new code to type on the Mac", false, agents::pairAgain);
+        }
         if (!history.list().isEmpty()) {
             s.add("Clear watch history", "Removes every show from Continue watching", false, history::clear);
         }
@@ -890,7 +893,7 @@ public class HomeActivity extends Activity {
     private String agentsSetting() {
         if (!prefs.showAgents) return "Off";
         AgentStatus.Snapshot s = agents.last;
-        if (s != null && s.phase == AgentStatus.PAIRING) return "On  ·  pair with code " + s.code;
+        if (s != null && s.phase == AgentStatus.PAIRING) return "On  ·  pair with code " + AgentStatus.grouped(s.code);
         if (agents.paired() && s != null) return "On  ·  T3 Code chats from " + s.mac;
         return "On  ·  T3 Code chats from your Mac (Lumen Agents)";
     }

@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -17,12 +18,14 @@ import android.widget.TextView;
  * you. It can't take focus or touches, so the remote keeps controlling the app underneath.
  */
 final class AgentAlert {
-    private static final long SHOW_MS = 8000;
+    private static final long SHOW_MS = 8000, GAP_MS = 10_000;
 
     private final Context c;
     private final WindowManager wm;
     private LinearLayout card;
     private final Runnable hide = this::hide;
+    /** When the last alert appeared. One per GAP_MS, so a busy (or hostile) Mac can't keep a card up all the time. */
+    private long shownAt = -GAP_MS;
 
     /** c must be able to add accessibility overlays (the accessibility service). */
     AgentAlert(Context c) {
@@ -32,6 +35,9 @@ final class AgentAlert {
 
     /** Shows the most urgent chat; more than one is mentioned in the label. */
     void show(AgentStatus.Chat chat, int count, String mac) {
+        long now = SystemClock.uptimeMillis();
+        if (now - shownAt < GAP_MS) return;
+        shownAt = now;
         if (card == null) add();
         LinearLayout body = card;
         ((TextView) body.findViewWithTag("label")).setText(count > 1

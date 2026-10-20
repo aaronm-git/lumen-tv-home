@@ -30,13 +30,13 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -51,6 +51,7 @@ import javax.crypto.spec.SecretKeySpec;
  * once with a code shown on the TV. Then it keeps one request open that the Mac answers as soon as a chat changes,
  * but only while the home screen is showing, or while notifications are on and the TV is awake. Requests are
  * signed and replies encrypted with the paired key, so other devices on the network can't read or fake them.
+ * Once paired, nothing unsealed changes anything: only "Pair again" in Settings forgets the key.
  */
 final class AgentStatus {
     static final int SEARCHING = 0, OFFLINE = 1, PAIRING = 2, READY = 3;
@@ -173,6 +174,40 @@ final class AgentStatus {
         return sp.getBoolean("paired", false);
     }
 
+    /** Main thread. Settings: Pair again. Forgets the key, so the next request pairs with a new code. */
+    void pairAgain() {
+        Handler w = worker;
+        if (w == null) {
+            forget();
+            return;
+        }
+        w.post(() -> {
+            if (w != worker) return;
+            forget();
+            failures = 0;
+            w.removeCallbacksAndMessages(null);
+            poll(w);
+        });
+        HttpURLConnection c = waiting;
+        if (c != null) new Thread(c::disconnect).start();
+    }
+
+    private void forget() {
+        sp.edit().remove("key").remove("code").remove("device").putBoolean("paired", false).apply();
+        version = -1;
+    }
+
+    /** The code as the TV shows it: K7QM-9XRT-4HNP-2WVD. */
+    static String grouped(String code) {
+        if (code == null) return "";
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < code.length(); i++) {
+            if (i > 0 && i % 4 == 0) b.append('-');
+            b.append(code.charAt(i));
+        }
+        return b.toString();
+    }
+
     private void poll(Handler w) {
         if (w != worker) return;
         long next = POLL_MS;
@@ -186,8 +221,9 @@ final class AgentStatus {
             } else {
                 next = status(host);
             }
-        } catch (IOException | JSONException | GeneralSecurityException e) {
+        } catch (IOException | JSONException | GeneralSecurityException | RuntimeException e) {
             // The Mac may be asleep or have a new address: look for it again, but keep trying the old one.
+            // (RuntimeException: whatever arrives, from a spoofed helper too, mustn't crash the launcher.)
             version = -1;
             if (++failures >= 2) {
                 search();
@@ -201,24 +237,37 @@ final class AgentStatus {
     /** Returns how long to wait before asking again. */
     private long status(String host) throws IOException, JSONException, GeneralSecurityException {
         byte[] key = Base64.decode(sp.getString("key", ""), Base64.NO_WRAP);
+        if (key.length != 32) throw new GeneralSecurityException("bad key");
         String time = String.valueOf(System.currentTimeMillis());
         long asked = SystemClock.elapsedRealtime();
-        HttpURLConnection c = open(host, version >= 0 ? "/status?wait=" + version : "/status");
+        String target = version >= 0 ? "/status?wait=" + version : "/status";
+        HttpURLConnection c = open(host, target);
         // The Mac holds the reply for up to 45 s when nothing has changed.
         c.setReadTimeout(75_000);
         waiting = c;
         try {
             c.setRequestProperty("X-Lumen-Device", sp.getString("device", ""));
             c.setRequestProperty("X-Lumen-Time", time);
-            c.setRequestProperty("X-Lumen-Auth", hex(hmac(key, ("GET /status\n" + time).getBytes(StandardCharsets.UTF_8))));
+            c.setRequestProperty("X-Lumen-Auth",
+                    hex(hmac(key, ("GET " + target + "\n" + time).getBytes(StandardCharsets.UTF_8))));
             int code = c.getResponseCode();
             byte[] box = readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
-            if (code == 401) {
-                // Unpaired on the Mac, or the code expired: start over with a new one.
-                sp.edit().remove("key").remove("code").putBoolean("paired", false).apply();
-                version = -1;
+            if ((code == 401 || code == 403) && !paired()) {
+                // Not approved yet: the Mac can't seal anything until the code is typed there, so these are plain.
+                // Forged ones can only delay pairing.
+                failures = 0;
+                stopDiscovery();
+                if (code == 401) {
+                    // The request expired, or the Mac restarted: start over with a new code.
+                    forget();
+                } else {
+                    publish(new Snapshot(PAIRING, sp.getString("mac", "Mac"), sp.getString("code", ""), null,
+                            Collections.emptyList()));
+                }
                 return POLL_MS;
             }
+            // Anything else is a failure (offline), never a reason to drop the key.
+            if (code != 200) throw new IOException("HTTP " + code);
             // AES-GCM: nonce, then ciphertext and tag. Anything not sealed with our key fails here.
             if (box.length < 28) throw new IOException("not sealed");
             Cipher aes = Cipher.getInstance("AES/GCM/NoPadding");
@@ -227,12 +276,6 @@ final class AgentStatus {
             byte[] body = aes.doFinal(box, 12, box.length - 12);
             failures = 0;
             stopDiscovery();
-            if (code == 403) {
-                publish(new Snapshot(PAIRING, sp.getString("mac", "Mac"), sp.getString("code", ""), null,
-                        Collections.emptyList()));
-                return POLL_MS;
-            }
-            if (code != 200) throw new IOException("HTTP " + code);
             JSONObject o = new JSONObject(new String(body, StandardCharsets.UTF_8));
             List<Chat> chats = new ArrayList<>();
             JSONArray a = o.optJSONArray("chats");
@@ -254,8 +297,8 @@ final class AgentStatus {
     }
 
     /**
-     * Agrees a key with the Mac (P-256 ECDH). Both sides show a code made from both public keys; approving it on
-     * the Mac (lumen-agents pair <code>) proves nothing in between swapped them.
+     * Agrees a secret with the Mac (P-256 ECDH) and makes a random code that never goes over the network. The key
+     * needs both, so only a Mac you typed the code into (lumen-agents pair <code>) can read or sign anything.
      */
     private void pair(String host) throws IOException, JSONException, GeneralSecurityException {
         KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
@@ -282,26 +325,33 @@ final class AgentStatus {
         }
 
         byte[] macDer = Base64.decode(reply.getString("key"), Base64.NO_WRAP);
+        if (macDer.length > 200) throw new GeneralSecurityException("bad key");
         PublicKey theirs = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(macDer));
         KeyAgreement ka = KeyAgreement.getInstance("ECDH");
         ka.init(mine.getPrivate());
         ka.doPhase(theirs, true);
-        byte[] key = sha256("lumen-agents/v1".getBytes(StandardCharsets.UTF_8), ka.generateSecret());
-        byte[] d = sha256(der, macDer);
-        long n = ((d[0] & 0xFFL) << 24) | ((d[1] & 0xFF) << 16) | ((d[2] & 0xFF) << 8) | (d[3] & 0xFF);
-        String code = String.format(Locale.ROOT, "%06d", n % 1_000_000);
+        byte[] secret = ka.generateSecret();
+        if (secret.length != 32) throw new GeneralSecurityException("bad secret");
+        // 16 characters of Crockford base32: 80 bits, so nobody can guess it to sit in the middle.
+        String alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        SecureRandom random = new SecureRandom();
+        StringBuilder code = new StringBuilder();
+        for (int i = 0; i < 16; i++) code.append(alphabet.charAt(random.nextInt(32)));
+        byte[] key = derive("lumen-agents/v2".getBytes(StandardCharsets.UTF_8), secret,
+                code.toString().getBytes(StandardCharsets.US_ASCII), der, macDer);
         byte[] id = new byte[8];
         System.arraycopy(sha256(der), 0, id, 0, 8);
         String mac = reply.optString("mac", "Mac");
+        if (mac.length() > 60) mac = mac.substring(0, 60);
         sp.edit()
                 .putString("key", Base64.encodeToString(key, Base64.NO_WRAP))
                 .putString("device", hex(id))
-                .putString("code", code)
+                .putString("code", code.toString())
                 .putString("mac", mac)
                 .putBoolean("paired", false)
                 .apply();
         failures = 0;
-        publish(new Snapshot(PAIRING, mac, code, null, Collections.emptyList()));
+        publish(new Snapshot(PAIRING, mac, code.toString(), null, Collections.emptyList()));
     }
 
     // ---- Finding the Mac -------------------------------------------------------------------
@@ -419,6 +469,7 @@ final class AgentStatus {
         c.setConnectTimeout(2500);
         c.setReadTimeout(4000);
         c.setUseCaches(false);
+        c.setInstanceFollowRedirects(false);
         return c;
     }
 
@@ -444,6 +495,16 @@ final class AgentStatus {
     private static byte[] sha256(byte[]... parts) throws GeneralSecurityException {
         MessageDigest d = MessageDigest.getInstance("SHA-256");
         for (byte[] p : parts) d.update(p);
+        return d.digest();
+    }
+
+    /** SHA-256 over length-prefixed parts (derive in LumenAgents.swift does the same). */
+    private static byte[] derive(byte[]... parts) throws GeneralSecurityException {
+        MessageDigest d = MessageDigest.getInstance("SHA-256");
+        for (byte[] p : parts) {
+            d.update(new byte[]{(byte) (p.length >> 8), (byte) p.length});
+            d.update(p);
+        }
         return d.digest();
     }
 

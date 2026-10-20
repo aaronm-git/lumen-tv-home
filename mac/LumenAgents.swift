@@ -2,11 +2,12 @@
 //
 // It reads T3 Code with a read-only token (`t3 auth session issue --scope orchestration:read`), loads the thread
 // list over HTTP, then follows the server's shell stream so it only wakes when a chat changes. The TV finds it over
-// Bonjour (_lumen-agents._tcp) and must be paired once: both sides show the same six-digit code. Requests are signed
-// and replies encrypted with the key they agreed, so other devices on the network can neither read nor fake them.
+// Bonjour (_lumen-agents._tcp) and must be paired once: the TV shows a code that never goes over the network, and
+// typing it here completes the key. Requests are signed and replies encrypted with that key, so other devices on the
+// network can neither read nor fake them.
 //
 //   lumen-agents serve          run the helper (launchd does this)
-//   lumen-agents pair 123456    approve the TV showing that code
+//   lumen-agents pair <code>    approve the TV showing that code (K7QM-9XRT-4HNP-2WVD; any case, dashes optional)
 //   lumen-agents devices        list paired TVs
 //   lumen-agents unpair all     forget every TV (or pass a name)
 //   lumen-agents status         print what the TV would see
@@ -14,11 +15,15 @@ import CryptoKit
 import Foundation
 import Network
 
-let port: UInt16 = 47837
+let env = ProcessInfo.processInfo.environment
 let fm = FileManager.default
 let home = fm.homeDirectoryForCurrentUser
-let dir = home.appendingPathComponent("Library/Application Support/Lumen Agents")
-let t3Home = ProcessInfo.processInfo.environment["T3CODE_HOME"].map { URL(fileURLWithPath: $0) }
+// LUMEN_AGENTS_PORT and LUMEN_AGENTS_DIR run a second, test instance; it isn't advertised over Bonjour.
+let port: UInt16 = env["LUMEN_AGENTS_PORT"].flatMap { UInt16($0) }.flatMap { $0 > 0 ? $0 : nil } ?? 47837
+let dir = env["LUMEN_AGENTS_DIR"].map { URL(fileURLWithPath: $0) }
+    ?? home.appendingPathComponent("Library/Application Support/Lumen Agents")
+let advertise = env["LUMEN_AGENTS_PORT"] == nil && env["LUMEN_AGENTS_DIR"] == nil
+let t3Home = env["T3CODE_HOME"].map { URL(fileURLWithPath: $0) }
     ?? home.appendingPathComponent(".t3")
 let q = DispatchQueue(label: "lumen-agents")
 let macName = Host.current().localizedName ?? "Mac"
@@ -33,28 +38,56 @@ func read(_ name: String) -> Data? { try? Data(contentsOf: dir.appendingPathComp
 
 func write(_ name: String, _ data: Data) {
     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-    try? data.write(to: dir.appendingPathComponent(name), options: .atomic)
+    let url = dir.appendingPathComponent(name)
+    try? data.write(to: url, options: .atomic)
+    try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
 }
 
 func json(_ data: Data?) -> [String: Any]? {
     data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
 }
 
-func encode(_ obj: Any) -> Data { (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data() }
+func encode(_ obj: Any) -> Data {
+    // JSONSerialization raises (not throws) on objects it can't encode.
+    guard JSONSerialization.isValidJSONObject(obj) else { return Data() }
+    return (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data()
+}
 
 func hex(_ bytes: some Sequence<UInt8>) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
 
 func unhex(_ s: String) -> Data? {
-    guard s.count % 2 == 0 else { return nil }
-    var out = Data(capacity: s.count / 2)
-    var i = s.startIndex
-    while i < s.endIndex {
-        let j = s.index(i, offsetBy: 2)
-        guard let b = UInt8(s[i..<j], radix: 16) else { return nil }
-        out.append(b)
-        i = j
+    let digits = s.utf8.map { c -> UInt8? in
+        switch c {
+        case 48...57: return c - 48
+        case 97...102: return c - 87
+        case 65...70: return c - 55
+        default: return nil
+        }
+    }
+    guard digits.count % 2 == 0, digits.count <= 256 else { return nil }
+    var out = Data(capacity: digits.count / 2)
+    for i in stride(from: 0, to: digits.count, by: 2) {
+        guard let hi = digits[i], let lo = digits[i + 1] else { return nil }
+        out.append(hi << 4 | lo)
     }
     return out
+}
+
+/** Without control or invisible formatting characters (names and titles end up in logs and the terminal), capped. */
+func clean(_ s: String, _ max: Int) -> String {
+    var out = String.UnicodeScalarView()
+    for u in s.unicodeScalars {
+        if u.properties.isWhitespace { out.append(" ") }
+        else if u.value == 0x200D || ![.control, .format].contains(u.properties.generalCategory) { out.append(u) }
+    }
+    let t = String(out)
+    return t.count > max ? String(t.prefix(max - 1)) + "…" : t
+}
+
+/** Compares secrets in constant time. */
+func same(_ a: String, _ b: String) -> Bool {
+    let x = Array(a.utf8), y = Array(b.utf8)
+    return x.count == y.count && zip(x, y).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
 }
 
 let isoFrac: ISO8601DateFormatter = {
@@ -171,7 +204,8 @@ final class T3 {
 
     private var base: URL {
         let runtime = json(try? Data(contentsOf: t3Home.appendingPathComponent("userdata/server-runtime.json")))
-        return URL(string: "http://127.0.0.1:\(runtime?["port"] as? Int ?? 3773)")!
+        let p = runtime?["port"] as? Int ?? 3773
+        return URL(string: "http://127.0.0.1:\((1...65535).contains(p) ? p : 3773)")!
     }
 
     private var token: String? {
@@ -216,7 +250,8 @@ final class T3 {
             url.scheme = "ws"
             url.queryItems = [URLQueryItem(name: "orchestrationProtocol", value: "2"),
                               URLQueryItem(name: "wsTicket", value: ticket)]
-            let task = session.webSocketTask(with: url.url!)
+            guard let wsURL = url.url else { return later() }
+            let task = session.webSocketTask(with: wsURL)
             task.maximumMessageSize = 64 << 20
             ws = task
             lastPong = Date()
@@ -254,7 +289,7 @@ final class T3 {
                 case "Ping":
                     send(task, ["_tag": "Pong"])
                 case "Exit", "Defect", "ClientProtocolError":
-                    return lost(task, "stream ended: \(String(data: data ?? Data(), encoding: .utf8)?.prefix(300) ?? "")")
+                    return lost(task, "stream ended: \(clean(String(decoding: data ?? Data(), as: UTF8.self), 300))")
                 default:
                     break
                 }
@@ -264,7 +299,7 @@ final class T3 {
     }
 
     private func send(_ task: URLSessionWebSocketTask, _ obj: [String: Any]) {
-        task.send(.string(String(data: encode(obj), encoding: .utf8)!)) { _ in }
+        task.send(.string(String(decoding: encode(obj), as: UTF8.self))) { _ in }
     }
 
     private func lost(_ task: URLSessionWebSocketTask, _ why: String) {
@@ -383,17 +418,16 @@ final class T3 {
             } else {
                 continue
             }
-            var chat: [String: Any] = ["id": t.id, "title": t.title, "state": state, "detail": detail,
-                                       "project": projects[t.project] ?? "", "brand": t.brand, "model": t.model]
-            if let at { chat["age"] = max(0, Int(now.timeIntervalSince(at))) }
-            if var s = text?.split(whereSeparator: \.isWhitespace).joined(separator: " "), !s.isEmpty {
-                if s.count > 280 { s = String(s.prefix(279)) + "…" }
-                chat["text"] = s
-            }
+            var chat: [String: Any] = ["id": clean(t.id, 100), "title": clean(t.title, 200), "state": state,
+                                       "detail": detail, "project": clean(projects[t.project] ?? "", 80),
+                                       "brand": t.brand, "model": clean(t.model, 80)]
+            if let at { chat["age"] = Int(max(0, min(now.timeIntervalSince(at), 1e9))) }
+            let s = clean(text?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? "", 280)
+            if !s.isEmpty { chat["text"] = s }
             out.append((rank, at ?? now, chat))
         }
         out.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.at > $1.at }
-        return out.map(\.chat)
+        return out.prefix(20).map(\.chat)
     }
 }
 
@@ -404,16 +438,54 @@ struct Device {
     let key: SymmetricKey
 }
 
+/** Crockford base32, as the TV writes the code. */
+let codeAlphabet = Set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+/** The code as typed: any case, dashes and spaces optional, O for 0 and I or L for 1. */
+func normalize(_ typed: String) -> String? {
+    let code = String(typed.uppercased().compactMap { c -> Character? in
+        switch c {
+        case "-", " ": return nil
+        case "O": return "0"
+        case "I", "L": return "1"
+        default: return c
+        }
+    })
+    return code.count == 16 && code.allSatisfy(codeAlphabet.contains) ? code : nil
+}
+
+/** SHA-256 over length-prefixed parts (AgentStatus.derive on the TV does the same). */
+func derive(_ parts: [Data]) -> SymmetricKey {
+    var h = SHA256()
+    for p in parts {
+        h.update(data: Data([UInt8(p.count >> 8 & 0xFF), UInt8(p.count & 0xFF)]))
+        h.update(data: p)
+    }
+    return SymmetricKey(data: h.finalize())
+}
+
 final class Pairing {
     private(set) var devices: [String: Device] = [:]
-    /** Waiting for `lumen-agents pair <code>`; dropped after 15 minutes. */
-    private var pending: [String: (device: Device, code: String, expires: Date)] = [:]
+    /**
+     * TVs waiting for `lumen-agents pair <code>`, dropped after 15 minutes. The key needs the code too, which never
+     * leaves the TV, so until then the Mac keeps the ECDH secret and the TV's latest signed request, and checks that
+     * request against the code you type.
+     */
+    private var pending: [String: Pending] = [:]
     private var lastTime: [String: Int64] = [:]
+    private var pairTimes: [Date] = []
+
+    struct Pending {
+        let name: String
+        let secret, tvKey, macKey: Data
+        let expires: Date
+        var request: (signed: Data, mac: Data, time: Int64)?
+    }
 
     init() {
         for (id, v) in json(read("devices.json")) ?? [:] {
-            guard let d = v as? [String: Any], let k = (d["key"] as? String).flatMap(unhex) else { continue }
-            devices[id] = Device(name: d["name"] as? String ?? "TV", key: SymmetricKey(data: k))
+            guard let d = v as? [String: Any], let k = (d["key"] as? String).flatMap(unhex), k.count == 32 else { continue }
+            devices[id] = Device(name: clean(d["name"] as? String ?? "TV", 60), key: SymmetricKey(data: k))
         }
     }
 
@@ -425,101 +497,122 @@ final class Pairing {
         write("devices.json", encode(out))
     }
 
-    /**
-     * Agrees a key with the TV (P-256). The code both sides show is a hash of both public keys, so a device in
-     * the middle would make the codes differ.
-     */
-    func begin(_ body: [String: Any]) -> [String: Any]? {
-        guard let b64 = body["key"] as? String, let der = Data(base64Encoded: b64),
-              let tvKey = try? P256.KeyAgreement.PublicKey(derRepresentation: der) else { return nil }
-        let mine = P256.KeyAgreement.PrivateKey()
-        guard let shared = try? mine.sharedSecretFromKeyAgreement(with: tvKey) else { return nil }
-        let macDer = mine.publicKey.derRepresentation
-        let secret = shared.withUnsafeBytes { Data($0) }
-        let key = SymmetricKey(data: SHA256.hash(data: Data("lumen-agents/v1".utf8) + secret))
-        let id = hex(SHA256.hash(data: der).prefix(8))
-        let digest = Array(SHA256.hash(data: der + macDer))
-        let n = (UInt32(digest[0]) << 24 | UInt32(digest[1]) << 16 | UInt32(digest[2]) << 8 | UInt32(digest[3]))
-        let code = String(format: "%06u", n % 1_000_000)
-
+    /** Agrees a secret with the TV (P-256 ECDH). Ten tries a minute and eight waiting TVs at most. */
+    func begin(_ body: [String: Any]) -> (Int, [String: Any]) {
         let now = Date()
+        pairTimes = pairTimes.filter { now.timeIntervalSince($0) < 60 }
         pending = pending.filter { $0.value.expires > now }
-        if pending.count >= 8, let oldest = pending.min(by: { $0.value.expires < $1.value.expires }) {
-            pending[oldest.key] = nil
-        }
-        let name = String((body["name"] as? String ?? "TV").prefix(60))
-        pending[id] = (Device(name: name, key: key), code, now.addingTimeInterval(900))
-        log("pairing requested by \(name); code \(code)")
-        return ["key": macDer.base64EncodedString(), "mac": macName]
+        guard pairTimes.count < 10, pending.count < 8 else { return (429, ["error": "busy"]) }
+        pairTimes.append(now)
+        guard let b64 = body["key"] as? String, b64.count < 400, let der = Data(base64Encoded: b64),
+              let tvKey = try? P256.KeyAgreement.PublicKey(derRepresentation: der) else { return (400, ["error": "bad key"]) }
+        let mine = P256.KeyAgreement.PrivateKey()
+        guard let shared = try? mine.sharedSecretFromKeyAgreement(with: tvKey) else { return (400, ["error": "bad key"]) }
+        let id = hex(SHA256.hash(data: der).prefix(8))
+        guard pending[id] == nil, devices[id] == nil else { return (400, ["error": "bad key"]) }
+        let name = clean(body["name"] as? String ?? "TV", 60)
+        pending[id] = Pending(name: name, secret: shared.withUnsafeBytes { Data($0) }, tvKey: der,
+                              macKey: mine.publicKey.derRepresentation, expires: now.addingTimeInterval(900))
+        log("pairing requested by \(name)")
+        return (200, ["key": mine.publicKey.derRepresentation.base64EncodedString(), "mac": macName])
     }
 
-    func approve(_ code: String) -> String? {
+    /** Pairs the waiting TV whose latest request was signed with the key this code makes. */
+    func approve(_ typed: String) -> String? {
+        guard let code = normalize(typed) else { return nil }
         let now = Date()
-        guard let (id, p) = pending.first(where: { $0.value.code == code && $0.value.expires > now }) else { return nil }
-        pending[id] = nil
-        devices[id] = p.device
-        save()
-        return p.device.name
+        for (id, p) in pending where p.expires > now {
+            guard let r = p.request else { continue }
+            let key = derive([Data("lumen-agents/v2".utf8), p.secret, Data(code.utf8), p.tvKey, p.macKey])
+            guard HMAC<SHA256>.isValidAuthenticationCode(r.mac, authenticating: r.signed, using: key) else { continue }
+            pending[id] = nil
+            devices[id] = Device(name: p.name, key: key)
+            lastTime[id] = r.time
+            save()
+            return p.name
+        }
+        return nil
     }
 
     func forget(_ which: String) -> Int {
-        let before = devices.count
-        devices = devices.filter { which != "all" && $0.key != which && $0.value.name != which }
+        let gone = devices.filter { which == "all" || $0.key == which || $0.value.name == which }.map(\.key)
+        for id in gone {
+            devices[id] = nil
+            lastTime[id] = nil
+        }
         save()
-        return before - devices.count
+        return gone.count
     }
 
-    enum Check { case ok(SymmetricKey), pending(SymmetricKey), unknown }
+    enum Check { case ok(SymmetricKey), pending, unknown }
 
-    /** X-Lumen-Auth is HMAC(key, "GET /status\n<time>"); times must be recent and only go up, so replays fail. */
+    /**
+     * X-Lumen-Auth is HMAC(key, "GET <path and query>\n<time>"); times must be recent and only go up, so replays
+     * fail. A waiting TV's request can't be checked yet, so it's only kept for approve().
+     */
     func check(_ r: Request) -> Check {
         guard let id = r.headers["x-lumen-device"], let time = r.headers["x-lumen-time"], let t = Int64(time),
               let mac = r.headers["x-lumen-auth"].flatMap(unhex) else { return .unknown }
-        let found = devices[id].map { (key: $0.key, paired: true) }
-            ?? pending[id].flatMap { $0.expires > Date() ? (key: $0.device.key, paired: false) : nil }
-        guard let found,
-              HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: Data("\(r.method) \(r.path)\n\(time)".utf8),
-                                                     using: found.key),
-              abs(Int64(Date().timeIntervalSince1970 * 1000) - t) < 600_000, t > lastTime[id] ?? 0
-        else { return .unknown }
-        lastTime[id] = t
-        return found.paired ? .ok(found.key) : .pending(found.key)
+        // Bounds around now rather than now - t, which a huge t could overflow.
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        guard t > now - 600_000, t < now + 600_000, t > lastTime[id] ?? 0 else { return .unknown }
+        let signed = Data("\(r.method) \(r.target)\n\(time)".utf8)
+        if let d = devices[id] {
+            guard HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: signed, using: d.key) else { return .unknown }
+            lastTime[id] = t
+            return .ok(d.key)
+        }
+        guard var p = pending[id], p.expires > Date() else { return .unknown }
+        p.request = (signed, mac, t)
+        pending[id] = p
+        return .pending
     }
 }
 
 // ---- LAN server ---------------------------------------------------------------------------
 
 struct Request {
-    let method, path: String
+    let method, path, target: String
     let query: [String: String]
     let headers: [String: String]
     let body: Data
 
-    /** Parses a complete HTTP/1.1 request, or returns nil if more bytes are needed. */
-    init?(_ buf: Data) {
-        guard let end = buf.range(of: Data("\r\n\r\n".utf8)),
-              let head = String(data: buf[..<end.lowerBound], encoding: .utf8) else { return nil }
+    enum Parsed { case more, bad, ok(Request) }
+
+    /** Parses a complete HTTP/1.1 request; anything odd is .bad. Small heads and bodies only (the TV sends tiny ones). */
+    static func parse(_ buf: Data) -> Parsed {
+        guard let end = buf.range(of: Data("\r\n\r\n".utf8)) else { return buf.count > 8192 ? .bad : .more }
+        guard end.lowerBound - buf.startIndex <= 8192,
+              let head = String(data: buf[..<end.lowerBound], encoding: .utf8) else { return .bad }
         let lines = head.components(separatedBy: "\r\n")
-        let first = lines[0].split(separator: " ")
-        guard first.count >= 2 else { return nil }
-        method = String(first[0])
-        let target = first[1].split(separator: "?", maxSplits: 1)
-        path = String(target[0])
+        let first = lines[0].split(separator: " ", omittingEmptySubsequences: false)
+        guard first.count == 3, first[2].hasPrefix("HTTP/1."), !first[0].isEmpty, first[0].allSatisfy(\.isUppercase),
+              first[1].hasPrefix("/"), first[1].count <= 2048 else { return .bad }
+        let target = String(first[1])
+        let q = target.firstIndex(of: "?")
         var qs: [String: String] = [:]
-        for pair in target.count > 1 ? target[1].split(separator: "&") : [] {
+        for pair in q.map({ target[target.index(after: $0)...].split(separator: "&") }) ?? [] {
             let kv = pair.split(separator: "=", maxSplits: 1)
             if kv.count == 2 { qs[String(kv[0])] = String(kv[1]) }
         }
-        query = qs
         var h: [String: String] = [:]
         for line in lines.dropFirst() {
-            guard let c = line.firstIndex(of: ":") else { continue }
-            h[line[..<c].lowercased()] = line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)
+            guard let c = line.firstIndex(of: ":"), c != line.startIndex, h.count < 64 else { return .bad }
+            let name = line[..<c].lowercased()
+            // One plain length only: no chunked bodies, no conflicting lengths.
+            if name == "transfer-encoding" || (name == "content-length" && h[name] != nil) { return .bad }
+            h[name] = line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)
         }
-        headers = h
-        let length = Int(h["content-length"] ?? "0") ?? 0
-        guard buf.count - end.upperBound >= length else { return nil }
-        body = buf[end.upperBound..<end.upperBound + length]
+        var length = 0
+        if let cl = h["content-length"] {
+            guard (1...5).contains(cl.utf8.count), cl.utf8.allSatisfy({ (48...57).contains($0) }), let n = Int(cl),
+                  n <= 16384 else { return .bad }
+            length = n
+        }
+        let start = end.upperBound
+        guard buf.endIndex - start >= length else { return .more }
+        return .ok(Request(method: String(first[0]), path: String(target[..<(q ?? target.endIndex)]), target: target,
+                           query: qs, headers: h, body: Data(buf[start..<start + length])))
     }
 }
 
@@ -535,6 +628,9 @@ final class Server {
     private var version = Int.random(in: 1..<1_000_000)
     private var shownKey = ""
     private var waiting: [(c: NWConnection, r: Request, key: SymmetricKey, until: Date)] = []
+    private var open = 0
+    /** The lumen-agents command reads this file (only you can) and sends it with each request. New every start. */
+    private let adminSecret = hex(SymmetricKey(size: .bits256).withUnsafeBytes { Array($0) })
 
     init(_ t3: T3) {
         self.t3 = t3
@@ -543,6 +639,7 @@ final class Server {
             helperId = hex(SymmetricKey(size: .bits128).withUnsafeBytes { Array($0.prefix(8)) })
             write("id", Data(helperId.utf8))
         }
+        write("admin", Data(adminSecret.utf8))
     }
 
     func start() {
@@ -574,9 +671,11 @@ final class Server {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
-            let l = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
-            l.service = NWListener.Service(name: nil, type: "_lumen-agents._tcp", domain: nil,
-                                           txtRecord: NWTXTRecord(["id": helperId]))
+            let l = try NWListener(using: params, on: NWEndpoint.Port(integerLiteral: port))
+            if advertise {
+                l.service = NWListener.Service(name: nil, type: "_lumen-agents._tcp", domain: nil,
+                                               txtRecord: NWTXTRecord(["id": helperId]))
+            }
             l.stateUpdateHandler = { [self] s in
                 log("listener: \(s)")
                 if case .failed = s { listener?.cancel(); q.asyncAfter(deadline: .now() + 5) { self.listen() } }
@@ -592,20 +691,33 @@ final class Server {
     }
 
     private func handle(_ c: NWConnection) {
+        // A few TVs and the command line need a handful; more is a flood.
+        guard open < 64 else { return c.cancel() }
+        open += 1
+        c.stateUpdateHandler = { [self, weak c] s in
+            if case .failed = s { c?.cancel() }
+            if case .cancelled = s { open -= 1 }
+        }
         c.start(queue: q)
         var buf = Data()
         var complete = false
-        q.asyncAfter(deadline: .now() + 10) { if !complete { c.cancel() } }
-        q.asyncAfter(deadline: .now() + 90) { c.cancel() }
+        // Weak, so a closed connection isn't kept for the full 90 s.
+        q.asyncAfter(deadline: .now() + 10) { [weak c] in if !complete { c?.cancel() } }
+        q.asyncAfter(deadline: .now() + 90) { [weak c] in c?.cancel() }
         func next() {
             c.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [self] data, _, done, error in
                 if let data { buf.append(data) }
-                if let r = Request(buf) {
+                switch Request.parse(buf) {
+                case .ok(let r):
                     complete = true
                     return respond(c, r)
+                case .bad:
+                    complete = true
+                    return send(c, 400, ["error": "bad request"])
+                case .more:
+                    if done || error != nil { return c.cancel() }
+                    next()
                 }
-                if done || error != nil || buf.count > 65536 { return c.cancel() }
-                next()
             }
         }
         next()
@@ -621,7 +733,8 @@ final class Server {
     }
 
     private func respond(_ c: NWConnection, _ r: Request) {
-        let local = isLocal(c)
+        // Browsers send Origin; the TV and the lumen-agents command never do.
+        if r.headers["origin"] != nil { return send(c, 403, ["error": "forbidden"]) }
         switch (r.method, r.path) {
         case ("GET", "/status"):
             switch pairing.check(r) {
@@ -631,22 +744,38 @@ final class Server {
                 } else {
                     sealed(c, 200, status(), key, r)
                 }
-            case .pending(let key): sealed(c, 403, encode(["error": "pending"]), key, r)
+            // Not sealed: there's no key until the code is typed here. The TV only trusts sealed replies once paired.
+            case .pending: send(c, 403, ["error": "pending"])
             case .unknown: send(c, 401, ["error": "unknown device"])
             }
         case ("POST", "/pair"):
-            if let reply = json(r.body).flatMap(pairing.begin) { send(c, 200, reply) }
-            else { send(c, 400, ["error": "bad key"]) }
-        // The rest is for the lumen-agents command on this Mac only.
-        case ("POST", "/approve") where local:
-            let code = String(data: r.body, encoding: .utf8)?.filter(\.isNumber) ?? ""
-            if let name = pairing.approve(code) { send(c, 200, ["paired": name]) }
+            let (code, reply) = pairing.begin(json(r.body) ?? [:])
+            send(c, code, reply)
+        case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"):
+            admin(c, r)
+        default:
+            send(c, 404, ["error": "not found"])
+        }
+    }
+
+    /**
+     * For the lumen-agents command on this Mac only: from loopback, with the admin secret, and addressed to
+     * 127.0.0.1 or localhost (so a web page can't reach it through DNS rebinding).
+     */
+    private func admin(_ c: NWConnection, _ r: Request) {
+        guard isLocal(c) else { return send(c, 404, ["error": "not found"]) }
+        guard ["127.0.0.1:\(port)", "localhost:\(port)"].contains((r.headers["host"] ?? "").lowercased()),
+              same(r.headers["authorization"] ?? "", "Bearer " + adminSecret)
+        else { return send(c, 403, ["error": "forbidden"]) }
+        switch (r.method, r.path) {
+        case ("POST", "/approve"):
+            if let name = pairing.approve(String(decoding: r.body, as: UTF8.self)) { send(c, 200, ["paired": name]) }
             else { send(c, 404, ["error": "No TV is showing that code. Open Lumen's home screen and try again."]) }
-        case ("GET", "/devices") where local:
+        case ("GET", "/devices"):
             send(c, 200, ["devices": pairing.devices.map { ["id": $0.key, "name": $0.value.name] }])
-        case ("POST", "/unpair") where local:
-            send(c, 200, ["removed": pairing.forget(String(data: r.body, encoding: .utf8) ?? "")])
-        case ("GET", "/debug") where local:
+        case ("POST", "/unpair"):
+            send(c, 200, ["removed": pairing.forget(String(decoding: r.body, as: UTF8.self))])
+        case ("GET", "/debug"):
             send(c, 200, encode(["t3": t3.state, "threads": t3.threads.count, "chats": t3.chats()]))
         default:
             send(c, 404, ["error": "not found"])
@@ -672,7 +801,8 @@ final class Server {
     private func send(_ c: NWConnection, _ code: Int, _ obj: [String: Any]) { send(c, code, encode(obj)) }
 
     private func send(_ c: NWConnection, _ code: Int, _ body: Data, _ extra: [String: String] = [:]) {
-        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found"][code] ?? ""
+        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+                      429: "Too Many Requests"][code] ?? ""
         var head = "HTTP/1.1 \(code) \(reason)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         for (k, v) in ["Content-Type": "application/json"].merging(extra, uniquingKeysWith: { $1 }) {
             head += "\(k): \(v)\r\n"
@@ -687,6 +817,8 @@ final class Server {
 func local(_ method: String, _ path: String, _ body: String = "") -> (Int, [String: Any]) {
     var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!, timeoutInterval: 5)
     r.httpMethod = method
+    let secret = read("admin").map { String(decoding: $0, as: UTF8.self) } ?? ""
+    r.setValue("Bearer " + secret.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "Authorization")
     if method == "POST" { r.httpBody = Data(body.utf8) }
     var result: (Int, [String: Any]) = (0, [:])
     let done = DispatchSemaphore(value: 0)
@@ -715,7 +847,7 @@ case "serve":
     dispatchMain()
 case "pair" where args.count == 2:
     let (code, reply) = local("POST", "/approve", args.last!)
-    print(code == 200 ? "Paired \(reply["paired"] ?? "TV"). It will show your chats in a few seconds." : "\(reply["error"] ?? "Failed")")
+    print(code == 200 ? "Paired \(reply["paired"] ?? "TV"). It will show your chats in a few seconds." : "\(reply["error"] ?? "Failed (HTTP \(code))")")
     exit(code == 200 ? 0 : 1)
 case "devices":
     let list = local("GET", "/devices").1["devices"] as? [[String: Any]] ?? []

@@ -65,17 +65,22 @@ T3-specific code lives here: if a T3 Code update changes something, only the hel
 
 ```sh
 ./mac/install.sh                  # build it and run it at login (launchd: local.lumen.agents)
-lumen-agents pair 123456          # approve the code the TV shows (first time only)
+lumen-agents pair K7QM-9XRT-4HNP-2WVD   # approve the code the TV shows (first time only; dashes optional)
 lumen-agents devices              # paired TVs;  lumen-agents unpair all  forgets them
 lumen-agents status               # what the TV would see
 ./mac/install.sh uninstall
 ```
 
-Pairing: the TV and the Mac agree a key (P-256 ECDH) and both derive the six-digit code from their public keys,
-so approving the code on the Mac also proves nothing in between swapped keys. After that requests are signed
-(HMAC-SHA256) and replies encrypted (AES-GCM) with that key, so other devices on the Wi-Fi can neither read the
-status nor fake it. Token, pairings and logs live in
-`~/Library/Application Support/Lumen Agents` and `~/Library/Logs/lumen-agents.log`.
+Pairing: the TV and the Mac agree a secret (P-256 ECDH), and the TV makes a random 16-character code (80 bits)
+that never goes over the network. The key comes from both, so only the Mac you type the code into has it: a device
+in between can't guess the code, and can't work it out from what it sees. Until then the Mac only answers "pending";
+when you type the code it checks the TV's latest signed request against it. After that requests (path, query and
+time) are signed (HMAC-SHA256) and replies encrypted (AES-GCM) with that key, so other devices on the Wi-Fi can
+neither read the status nor fake it, and the TV ignores anything that isn't sealed with it: it never drops the key
+on its own. To pair with a new key (say after `lumen-agents unpair`), pick **Pair again** in Lumen's Settings. The
+`lumen-agents` commands talk to the helper on 127.0.0.1 with a secret it writes for them at start, so other users
+and web pages can't. Token, pairings and logs live in `~/Library/Application Support/Lumen Agents` and
+`~/Library/Logs/lumen-agents.log`, readable only by you.
 
 ## Customise
 
