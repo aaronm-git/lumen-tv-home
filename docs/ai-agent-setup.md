@@ -16,11 +16,11 @@ You need:
 
 1. On your computer, open a terminal in an empty directory that you're comfortable letting the agent work in.
 2. Start your agent in that directory.
-3. Paste the following prompt, and replace *`REPOSITORY_URL`* with `https://github.com/aaronm-git/lumen-tv-home` or the URL of your fork:
+3. Paste the following prompt:
 
 ```text
 Set up Lumen, an open-source Android TV home screen, for me. The repository
-is REPOSITORY_URL.
+is https://github.com/aaronm-git/lumen-tv-home.
 
 Follow the repository's own docs, and treat them as the source of truth:
 docs/quickstart.md first, then docs/set-up-agents.md only if I say I want the
