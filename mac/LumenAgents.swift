@@ -1,6 +1,7 @@
 // Lumen Agents: a small Mac helper that follows T3 Code's chats and shares their status with Lumen on the TV.
 //
-// It reads T3 Code with a read-only token (`t3 auth session issue --scope orchestration:read`), loads the thread
+// It reads T3 Code with a read-only token (`t3 auth session issue --scope orchestration:read`, only when you run
+// `lumen-agents authorize`; once T3 Code rejects it, it stays off until you do that again), loads the thread
 // list over HTTP, then follows the server's shell stream so it only wakes when a chat changes. The TV finds it over
 // Bonjour (_lumen-agents._tcp) and must be paired once: the TV shows a code that never goes over the network, and
 // typing it here completes the key. Requests are signed and replies encrypted with that key, so other devices on the
@@ -11,6 +12,7 @@
 // x-t3-orchestration-protocol: 2.
 //
 //   lumen-agents serve          run the helper (launchd does this)
+//   lumen-agents authorize      let it read T3 Code: first time, and again after T3 Code rejects its token
 //   lumen-agents pair <code>    approve the TV showing that code (K7QM-9XRT-4HNP-2WVD; any case, dashes optional)
 //   lumen-agents devices        list paired TVs
 //   lumen-agents unpair all     forget every TV (or pass a name)
@@ -22,7 +24,8 @@ import Network
 let env = ProcessInfo.processInfo.environment
 let fm = FileManager.default
 let home = fm.homeDirectoryForCurrentUser
-// LUMEN_AGENTS_PORT and LUMEN_AGENTS_DIR run a second, test instance; it isn't advertised over Bonjour.
+// LUMEN_AGENTS_PORT and LUMEN_AGENTS_DIR run a second, test instance: it isn't advertised over Bonjour and only
+// listens on 127.0.0.1, so nothing else on the network can reach it.
 let port: UInt16 = env["LUMEN_AGENTS_PORT"].flatMap { UInt16($0) }.flatMap { $0 > 0 ? $0 : nil } ?? 47837
 let dir = env["LUMEN_AGENTS_DIR"].map { URL(fileURLWithPath: $0) }
     ?? home.appendingPathComponent("Library/Application Support/Lumen Agents")
@@ -40,11 +43,22 @@ func log(_ s: String) {
 
 func read(_ name: String) -> Data? { try? Data(contentsOf: dir.appendingPathComponent(name)) }
 
-func write(_ name: String, _ data: Data) {
-    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+func write(_ name: String, _ data: Data) throws {
+    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
     let url = dir.appendingPathComponent(name)
-    try? data.write(to: url, options: .atomic)
-    try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    try data.write(to: url, options: .atomic)
+    try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+}
+
+/**
+ * Deletes the file. Only "it isn't there" counts as done: any other error (the folder can't be searched or changed,
+ * say) is thrown, so nobody is told a key was removed for good when it wasn't.
+ */
+func delete(_ name: String) throws {
+    do {
+        try fm.removeItem(at: dir.appendingPathComponent(name))
+    } catch CocoaError.fileNoSuchFile {
+    }
 }
 
 func json(_ data: Data?) -> [String: Any]? {
@@ -225,7 +239,10 @@ let workingStates: Set<String> = ["preparing", "queued", "starting", "running", 
 final class T3 {
     var threads: [String: Thread] = [:]
     var projects: [String: String] = [:]
-    /** ok, offline (server not running) or auth (token rejected). */
+    /**
+     * ok, offline (server not running, or the connection dropped) or auth (no access: never authorized, or T3 Code
+     * rejected the token). Only ok shares chats.
+     */
     var state = "offline" {
         didSet { if state != oldValue { onChange?() } }
     }
@@ -235,8 +252,12 @@ final class T3 {
     private var ws: URLSessionWebSocketTask?
     private var retry = 1.0
     private var lastPong = Date()
-    private var lastIssue = Date.distantPast
     private var nextRequest = 1
+    /** Goes up whenever the connection is dropped, so replies to requests made before then are ignored. */
+    private var generation = 0
+    private var issuing = false
+    /** T3 Code rejected the token. Also saved as t3-blocked, so a restart doesn't undo it; authorize() clears both. */
+    private var rejected = false
     private let session: URLSession = {
         let ops = OperationQueue()
         ops.underlyingQueue = q
@@ -266,12 +287,18 @@ final class T3 {
         return URL(string: "http://127.0.0.1:\(p)")
     }
 
-    /** Tokens last 30 days, so an older one (a year-long one from before, too) is replaced. */
+    /**
+     * The token from `lumen-agents authorize`, unless T3 Code rejected it. Tokens last 30 days, so an older one (a
+     * year-long one from before, too) isn't used. None of these are replaced on their own: T3 Code says the same
+     * thing for a revoked token as for an expired one, so a new one only comes from you running authorize.
+     */
     private var token: String? {
         let url = dir.appendingPathComponent("t3-token")
-        guard let made = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+        guard !rejected, read("t3-blocked") == nil,
+              let made = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
               Date().timeIntervalSince(made) < 30 * 86_400 else { return nil }
-        return (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t?.isEmpty == false ? t : nil
     }
 
     private func request(_ base: URL, _ path: String, _ token: String, post: Bool = false) -> URLRequest {
@@ -284,39 +311,44 @@ final class T3 {
 
     /** Loads every thread over HTTP, then follows changes over the WebSocket from that point. */
     private func connect() {
-        guard let token, !token.isEmpty else { return issueToken() }
-        guard let server = base else {
-            state = "offline"
-            return later()
+        guard let token else {
+            reset()
+            if state != "auth" { log("no T3 Code access: run lumen-agents authorize") }
+            state = "auth"
+            // Nothing to retry: authorize() connects again.
+            onChange?()
+            return
         }
+        guard let server = base else { return offline() }
+        let gen = generation
         session.dataTask(with: request(server, "api/orchestration/shell", token)) { [self] data, response, error in
+            guard gen == generation else { return }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 || code == 403 { return reject("shell snapshot: HTTP \(code)") }
             guard code == 200, let snap = json(data) else {
-                if code == 401 || code == 403 {
-                    state = "auth"
-                    return issueToken()
-                }
-                state = "offline"
                 if code != 0 { log("shell snapshot: HTTP \(code)") }
-                return later()
+                return offline()
             }
             applySnapshot(snap)
             state = "ok"
             onChange?()
-            subscribe(token)
+            subscribe(token, gen)
         }.resume()
     }
 
-    private func subscribe(_ token: String) {
-        guard let server = base else { return later() }
-        session.dataTask(with: request(server, "api/auth/websocket-ticket", token, post: true)) { [self] data, _, _ in
-            guard let ticket = json(data)?["ticket"] as? String, let server = base,
+    private func subscribe(_ token: String, _ gen: Int) {
+        guard let server = base else { return offline() }
+        session.dataTask(with: request(server, "api/auth/websocket-ticket", token, post: true)) { [self] data, response, _ in
+            guard gen == generation else { return }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 || code == 403 { return reject("WebSocket ticket: HTTP \(code)") }
+            guard code == 200, let ticket = json(data)?["ticket"] as? String, let server = base,
                   var url = URLComponents(url: server.appendingPathComponent("ws"), resolvingAgainstBaseURL: false)
-            else { return later() }
+            else { return offline() }
             url.scheme = "ws"
             url.queryItems = [URLQueryItem(name: "orchestrationProtocol", value: "2"),
                               URLQueryItem(name: "wsTicket", value: ticket)]
-            guard let wsURL = url.url else { return later() }
+            guard let wsURL = url.url else { return offline() }
             let task = session.webSocketTask(with: wsURL)
             task.maximumMessageSize = 64 << 20
             ws = task
@@ -370,18 +402,58 @@ final class T3 {
         task.send(.string(String(decoding: encode(obj), as: UTF8.self))) { _ in }
     }
 
+    /**
+     * T3 Code closes the stream at once when you revoke the token, so this is where a revocation shows up: the
+     * reconnect then gets 401 and stops in reject().
+     */
     private func lost(_ task: URLSessionWebSocketTask, _ why: String) {
         guard task === ws else { return }
         log("T3 stream lost: \(why)")
-        ws = nil
-        task.cancel(with: .goingAway, reason: nil)
+        offline()
+    }
+
+    /**
+     * Forgets the chats and the stream and ignores replies still on their way, so nothing from before the drop can
+     * reach the TV. The next connect() starts over from a fresh snapshot.
+     */
+    private func reset() {
+        generation += 1
+        if let task = ws {
+            ws = nil
+            task.cancel(with: .goingAway, reason: nil)
+        }
+        threads = [:]
+        projects = [:]
+        sequence = 0
+    }
+
+    /** Not reachable for now: no chats until it's back, then the same token again. */
+    private func offline() {
+        reset()
+        state = "offline"
+        onChange?()
         later()
     }
 
+    /**
+     * T3 Code turned the token down: revoked, or expired (it doesn't say which). No chats, no retries and no new
+     * token until you run `lumen-agents authorize`, across restarts too (t3-blocked, and the token is deleted).
+     */
+    private func reject(_ why: String) {
+        log("T3 Code rejected the token (\(why)); run lumen-agents authorize to allow it again")
+        reset()
+        rejected = true
+        do { try write("t3-blocked", Data()) } catch { log("couldn't save t3-blocked: \(error)") }
+        do { try delete("t3-token") } catch { log("couldn't delete the rejected token: \(error)") }
+        state = "auth"
+        onChange?()
+    }
+
     private func later() {
-        let wait = retry
+        let wait = retry, gen = generation
         retry = min(retry * 2, 30)
-        q.asyncAfter(deadline: .now() + wait) { [self] in if ws == nil { connect() } }
+        // One retry at a time: a newer drop has scheduled its own.
+        q.asyncAfter(deadline: .now() + wait) { [self] in if gen == generation && ws == nil { connect() } }
     }
 
     private func applySnapshot(_ snap: [String: Any]) {
@@ -423,15 +495,14 @@ final class T3 {
         }
     }
 
-    /** Mints a fresh read-only token with T3's own CLI (at most every ten minutes). */
-    private func issueToken() {
-        guard Date().timeIntervalSince(lastIssue) > 600 else { return later() }
-        lastIssue = Date()
+    /**
+     * `lumen-agents authorize`: you allow it, so it gets a new read-only token with T3's own CLI and connects. The
+     * only way a token is made. done gets nil, or what went wrong.
+     */
+    func authorize(_ done: @escaping (String?) -> Void) {
+        guard !issuing else { return done("Already asking T3 Code for a token; try again in a moment.") }
         let cli = t3Home.appendingPathComponent("bin/t3")
-        guard fm.isExecutableFile(atPath: cli.path) else {
-            log("T3 Code's t3 command isn't at \(cli.path)")
-            return later()
-        }
+        guard fm.isExecutableFile(atPath: cli.path) else { return done("T3 Code's t3 command isn't at \(cli.path).") }
         log("issuing a read-only T3 Code token")
         let p = Process()
         p.executableURL = cli
@@ -443,14 +514,28 @@ final class T3 {
             let token = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             q.async { [self] in
-                if proc.terminationStatus == 0 && !token.isEmpty { write("t3-token", Data(token.utf8)) }
-                else { log("t3 auth session issue failed (\(proc.terminationStatus))") }
+                issuing = false
+                guard proc.terminationStatus == 0 && !token.isEmpty else {
+                    return done("t3 auth session issue failed (\(proc.terminationStatus)). Is T3 Code installed?")
+                }
+                // The token first: if clearing t3-blocked fails, it stays off.
+                do {
+                    try write("t3-token", Data(token.utf8))
+                    try delete("t3-blocked")
+                } catch {
+                    return done("Couldn't save the token in \(dir.path): \(error.localizedDescription)")
+                }
+                rejected = false
+                retry = 1
+                reset()
                 connect()
+                done(nil)
             }
         }
+        issuing = true
         do { try p.run() } catch {
-            log("couldn't run t3: \(error)")
-            later()
+            issuing = false
+            done("Couldn't run t3: \(error.localizedDescription)")
         }
     }
 
@@ -543,6 +628,11 @@ final class Pairing {
     private var lastTime: [String: Int64] = [:]
     /** Recent /pair requests by source (see Server.source()). */
     private var pairTimes: [String: [Date]] = [:]
+    /**
+     * A removal isn't on disk yet (persist() failed), so the old key would come back after a restart. The next
+     * unpair, or anything else that saves, tries again even if it removes nothing itself.
+     */
+    private(set) var unsaved = false
 
     struct Pending {
         let name, source: String
@@ -566,16 +656,50 @@ final class Pairing {
         }
         if old > 0 {
             log("dropped \(old) TV key(s) from an older pairing scheme; those TVs pair again")
-            save()
+            if case .failed(let why) = persist() { log(why) }
         }
     }
 
-    private func save() {
+    private func save() throws {
         var out: [String: Any] = [:]
         for (id, d) in devices {
             out[id] = ["v": 2, "name": d.name, "key": d.key.withUnsafeBytes { hex($0) }]
         }
-        write("devices.json", encode(out))
+        try write("devices.json", encode(out))
+        unsaved = false
+    }
+
+    enum Saved {
+        case saved, cleared, failed(String)
+
+        /** Whether a removal survives a restart. */
+        var lasts: Bool {
+            if case .failed = self { return false }
+            return true
+        }
+    }
+
+    /**
+     * Saves a removal so the key can't come back after a restart. If devices.json can't be written it's deleted
+     * instead (every TV pairs again after a restart: .cleared); .failed if even that didn't work.
+     */
+    private func persist() -> Saved {
+        do {
+            try save()
+            return .saved
+        } catch {
+            log("couldn't save paired TVs: \(error)")
+        }
+        do {
+            try delete("devices.json")
+            log("deleted devices.json instead: after a restart, every TV pairs again")
+            unsaved = false
+            return .cleared
+        } catch {
+            unsaved = true
+            return .failed("Couldn't save that in \(dir.path) (\(error.localizedDescription)), so the removed key "
+                + "comes back when Lumen Agents restarts. Fix that folder's permissions, then unpair again.")
+        }
     }
 
     /**
@@ -611,40 +735,51 @@ final class Pairing {
         return (200, ["key": mine.publicKey.derRepresentation.base64EncodedString(), "mac": macName])
     }
 
-    /** Pairs the waiting TV whose latest request was signed with the key this code makes. */
-    func approve(_ typed: String) -> String? {
+    /**
+     * Pairs the waiting TV whose latest request was signed with the key this code makes. Throws if the key can't be
+     * saved: that TV would be unknown after a restart, so it isn't paired at all.
+     */
+    func approve(_ typed: String) throws -> String? {
         guard let code = normalize(typed) else { return nil }
         let now = Date()
         for (id, p) in pending where p.expires > now {
             guard let r = p.request else { continue }
             let key = derive([Data("lumen-agents/v2".utf8), p.secret, Data(code.utf8), p.tvKey, p.macKey])
             guard HMAC<SHA256>.isValidAuthenticationCode(r.mac, authenticating: r.signed, using: key) else { continue }
-            pending[id] = nil
             devices[id] = Device(name: p.name, key: key)
+            do { try save() } catch {
+                devices[id] = nil
+                throw error
+            }
+            pending[id] = nil
             lastTime[id] = r.time
-            save()
             return p.name
         }
         return nil
     }
 
-    /** "Pair again" on the TV: it asks with a request signed by its own key, so it can only remove itself. */
-    func remove(_ id: String) {
-        guard let d = devices.removeValue(forKey: id) else { return }
+    /**
+     * "Pair again" on the TV: it asks with a request signed by its own key, so it can only remove itself. Gone at
+     * once either way; the result says whether that survives a restart.
+     */
+    func remove(_ id: String) -> Saved {
+        guard let d = devices.removeValue(forKey: id) else { return unsaved ? persist() : .saved }
         lastTime[id] = nil
-        save()
         log("\(d.name) forgot its key")
+        return persist()
     }
 
-    /** Returns the ids it removed. */
-    func forget(_ which: String) -> [String] {
+    /**
+     * Returns the ids it removed (at once) and whether that, and any earlier removal that couldn't be saved,
+     * survives a restart. So running the same unpair again after fixing the folder saves the earlier one.
+     */
+    func forget(_ which: String) -> (gone: [String], saved: Saved) {
         let gone = devices.filter { which == "all" || $0.key == which || $0.value.name == which }.map(\.key)
         for id in gone {
             devices[id] = nil
             lastTime[id] = nil
         }
-        save()
-        return gone
+        return (gone, gone.isEmpty && !unsaved ? .saved : persist())
     }
 
     enum Check { case ok(String, SymmetricKey), pending, unknown }
@@ -744,9 +879,9 @@ final class Server {
         if let id = read("id").flatMap({ String(data: $0, encoding: .utf8) }), !id.isEmpty { helperId = id }
         else {
             helperId = hex(SymmetricKey(size: .bits128).withUnsafeBytes { Array($0.prefix(8)) })
-            write("id", Data(helperId.utf8))
+            do { try write("id", Data(helperId.utf8)) } catch { log("couldn't save the helper's id: \(error)") }
         }
-        write("admin", Data(adminSecret.utf8))
+        do { try write("admin", Data(adminSecret.utf8)) } catch { log("couldn't save the admin secret: \(error)") }
     }
 
     func start() {
@@ -784,7 +919,9 @@ final class Server {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
-            let l = try NWListener(using: params, on: NWEndpoint.Port(integerLiteral: port))
+            let at = NWEndpoint.Port(integerLiteral: port)
+            if !advertise { params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: at) }
+            let l = advertise ? try NWListener(using: params, on: at) : try NWListener(using: params)
             if advertise {
                 l.service = NWListener.Service(name: nil, type: "_lumen-agents._tcp", domain: nil,
                                                txtRecord: NWTXTRecord(["id": helperId]))
@@ -876,10 +1013,12 @@ final class Server {
             send(c, code, reply)
         case ("POST", "/forget"):
             guard case .ok(let id, let key) = pairing.check(r) else { return send(c, 401, ["error": "unknown device"]) }
-            pairing.remove(id)
+            let saved = pairing.remove(id)
             drop([id])
-            sealed(c, 200, encode(["forgot": true]), key, r)
-        case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"):
+            if case .failed(let why) = saved { log(why) }
+            // The TV forgets its own key whatever this says.
+            sealed(c, 200, encode(["forgot": saved.lasts]), key, r)
+        case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"), (_, "/authorize"):
             admin(c, r)
         default:
             send(c, 404, ["error": "not found"])
@@ -897,16 +1036,38 @@ final class Server {
         else { return send(c, 403, ["error": "forbidden"]) }
         switch (r.method, r.path) {
         case ("POST", "/approve"):
-            if let name = pairing.approve(String(decoding: r.body, as: UTF8.self)) { send(c, 200, ["paired": name]) }
-            else { send(c, 404, ["error": "No TV is showing that code. Open Lumen's home screen and try again."]) }
+            do {
+                if let name = try pairing.approve(String(decoding: r.body, as: UTF8.self)) {
+                    send(c, 200, ["paired": name])
+                } else {
+                    send(c, 404, ["error": "No TV is showing that code. Open Lumen's home screen and try again."])
+                }
+            } catch {
+                send(c, 500, ["error": "Couldn't save the pairing in \(dir.path) (\(error.localizedDescription)), "
+                    + "so the TV isn't paired. Fix that folder's permissions and try again."])
+            }
         case ("GET", "/devices"):
             send(c, 200, ["devices": pairing.devices.map { ["id": $0.key, "name": $0.value.name] }])
         case ("POST", "/unpair"):
-            let gone = pairing.forget(String(decoding: r.body, as: UTF8.self))
+            let retry = pairing.unsaved
+            let (gone, saved) = pairing.forget(String(decoding: r.body, as: UTF8.self))
             drop(gone)
-            send(c, 200, ["removed": gone.count])
+            switch saved {
+            case .saved where retry:
+                send(c, 200, ["removed": gone.count, "note": "Saved the earlier removal too: it lasts after a restart."])
+            case .saved: send(c, 200, ["removed": gone.count])
+            case .cleared:
+                send(c, 200, ["removed": gone.count, "warning": "Couldn't update the list of paired TVs, so it was "
+                    + "deleted: after Lumen Agents restarts, every TV pairs again."])
+            case .failed(let why): send(c, 500, ["removed": gone.count, "error": why])
+            }
+        case ("POST", "/authorize"):
+            t3.authorize { [self] error in
+                if let error { send(c, 500, ["error": error]) } else { send(c, 200, ["authorized": true]) }
+            }
         case ("GET", "/debug"):
-            send(c, 200, encode(["t3": t3.state, "threads": t3.threads.count, "chats": t3.chats()]))
+            send(c, 200, encode(["t3": t3.state, "threads": t3.threads.count,
+                                 "chats": t3.state == "ok" ? t3.chats() : []]))
         default:
             send(c, 404, ["error": "not found"])
         }
@@ -944,7 +1105,7 @@ final class Server {
 
     private func send(_ c: NWConnection, _ code: Int, _ body: Data, _ extra: [String: String] = [:]) {
         let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-                      429: "Too Many Requests"][code] ?? ""
+                      429: "Too Many Requests", 500: "Internal Server Error"][code] ?? ""
         var head = "HTTP/1.1 \(code) \(reason)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         for (k, v) in ["Content-Type": "application/json"].merging(extra, uniquingKeysWith: { $1 }) {
             head += "\(k): \(v)\r\n"
@@ -956,8 +1117,8 @@ final class Server {
 // ---- Command line -------------------------------------------------------------------------
 
 /** Talks to the running helper on this Mac. */
-func local(_ method: String, _ path: String, _ body: String = "") -> (Int, [String: Any]) {
-    var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!, timeoutInterval: 5)
+func local(_ method: String, _ path: String, _ body: String = "", wait: TimeInterval = 5) -> (Int, [String: Any]) {
+    var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!, timeoutInterval: wait)
     r.httpMethod = method
     let secret = read("admin").map { String(decoding: $0, as: UTF8.self) } ?? ""
     r.setValue("Bearer " + secret.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "Authorization")
@@ -995,8 +1156,17 @@ case "devices":
     let list = local("GET", "/devices").1["devices"] as? [[String: Any]] ?? []
     if list.isEmpty { print("No TVs paired.") }
     for d in list { print("\(d["name"] ?? "")  (\(d["id"] ?? ""))") }
+case "authorize" where args.count == 1:
+    // T3's CLI can take a while to start.
+    let (code, reply) = local("POST", "/authorize", wait: 60)
+    print(code == 200 ? "T3 Code access allowed. The TV shows your chats in a few seconds."
+        : "\(reply["error"] ?? "Failed (HTTP \(code))")")
+    exit(code == 200 ? 0 : 1)
 case "unpair" where args.count == 2:
-    print("Removed \(local("POST", "/unpair", args.last!).1["removed"] ?? 0)")
+    let (code, reply) = local("POST", "/unpair", args.last!)
+    print("Removed \(reply["removed"] ?? 0)")
+    if let note = reply["error"] ?? reply["warning"] ?? reply["note"] { print("\(note)") }
+    exit(code == 200 ? 0 : 1)
 case "status":
     let data = encode(local("GET", "/debug").1)
     let pretty = (try? JSONSerialization.jsonObject(with: data)).flatMap {
@@ -1005,7 +1175,7 @@ case "status":
     print(String(data: pretty, encoding: .utf8) ?? "")
 default:
     print("""
-    usage: lumen-agents serve | pair <code> | devices | unpair <name|id|all> | status
+    usage: lumen-agents serve | authorize | pair <code> | devices | unpair <name|id|all> | status
     """)
     exit(2)
 }

@@ -92,13 +92,23 @@ public class HomeKeyService extends AccessibilityService {
     /** Listens to the Mac only while notifications are on and the screen is awake. */
     private void update() {
         boolean on = Prefs.agentAlerts(this);
-        if (!on) lastStates = null;
+        if (!on) {
+            lastStates = null;
+            alert.hide();
+        }
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         agents.want(AgentStatus.NOTIFY, on && pm.isInteractive());
     }
 
     private void onAgents(AgentStatus.Snapshot s) {
-        if (!s.active() || !Prefs.agentAlerts(this)) return;
+        if (!Prefs.agentAlerts(this)) return;
+        if (!s.active()) {
+            // The Mac or T3 Code went away, or access ended: take down a card that's up, and announce nothing that
+            // happened meanwhile when it's back.
+            alert.hide();
+            lastStates = null;
+            return;
+        }
         Map<String, String> now = new HashMap<>();
         AgentStatus.Chat first = null;
         int count = 0;

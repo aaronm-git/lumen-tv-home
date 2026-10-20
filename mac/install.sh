@@ -132,4 +132,5 @@ if ! { mv -f "$STAGE/lumen-agents" "$BIN" && ln -sf "$BIN" "$LINK" && chmod 644 
     exit 1
 fi
 echo "Lumen Agents is running (log: ~/Library/Logs/lumen-agents.log)."
+echo "Allow it to read T3 Code (first time, or after T3 Code rejects its token): lumen-agents authorize"
 echo "Pair the TV from Lumen's home screen, then run: lumen-agents pair <code>"

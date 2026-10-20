@@ -34,8 +34,9 @@ Agents) my Mac. Wait for me to approve before changing anything.
 
 Rules:
 - Ask before every step that installs software, changes system or TV
-  settings, enables an accessibility or notification-listener permission, or
-  installs a launchd job. Say what it does and how to undo it (docs/uninstall.md).
+  settings, enables an accessibility or notification-listener permission,
+  installs a launchd job, or creates a T3 Code session (lumen-agents
+  authorize). Say what it does and how to undo it (docs/uninstall.md).
 - Run only the commands the docs list. Don't use sudo. Don't disable
   security features, and don't forward any port from my router.
 - Ask me for my TV's IP address and ADB port. Don't scan my network for
@@ -66,7 +67,7 @@ repeatedly.
 
 ## Stay in control
 
-The agent runs commands as you, so review what it asks to run. Lumen's scripts change your TV's accessibility settings and, for Agents, install a launchd job and a read-only token on your Mac. See [what Lumen reads and stores](../PRIVACY.md#tv-data-and-permissions) and [what to do if you want to undo it](uninstall.md#before-you-begin).
+The agent runs commands as you, so review what it asks to run. Lumen's scripts change your TV's accessibility settings and, for Agents, install a launchd job on your Mac and, when you approve *`lumen-agents authorize`*, a read-only T3 Code token. See [what Lumen reads and stores](../PRIVACY.md#tv-data-and-permissions) and [what to do if you want to undo it](uninstall.md#before-you-begin).
 
 ## What's next
 

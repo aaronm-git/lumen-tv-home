@@ -45,6 +45,22 @@ Lumen is a small personal project. Changes are reviewed as time allows.
    ./mac/install.sh
    ```
 
+2. In the source directory, run the helper's offline tests:
+
+   ```sh
+   ./mac/tests/run.sh
+   ```
+
+   The script builds the helper, a fake T3 Code server, and the tests in a temporary directory, then runs them over loopback. The test helper and the fake server listen on 127.0.0.1 only, and the tests check that neither accepts connections on the Mac's network addresses. The tests cover access rejection and authorization, reconnecting after a drop, and pairing removal, including removals that can't be saved. They don't use your installed helper, its files, T3 Code, or a TV, and they take under a minute.
+
+3. In the source directory, run the TV side's offline tests:
+
+   ```sh
+   ./tests/android/run.sh
+   ```
+
+   The script compiles *`AgentStatus.java`* with small stand-ins for Android's classes and runs it on your computer's JDK against a fake helper on 127.0.0.1. The tests cover replies that arrive after the TV stopped listening or after **Pair again**, and clearing chats on the first failed request. They don't need the Android SDK, a TV, an emulator, or ADB, and they don't cover the views. Build the app with *`./build.sh`* to compile everything.
+
 ## Code conventions
 
 - Use plain Java with the Android framework for the TV app, without libraries or Gradle. Use Foundation, Network, and CryptoKit for the Swift helper.

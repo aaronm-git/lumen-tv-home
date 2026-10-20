@@ -61,7 +61,8 @@ The helper reads chats through T3 Code's local server with a read-only token and
 
 | Location | Data |
 | --- | --- |
-| `~/Library/Application Support/Lumen Agents/t3-token` | Read-only T3 Code session token, valid for 30 days and renewed automatically. |
+| `~/Library/Application Support/Lumen Agents/t3-token` | Read-only T3 Code session token, valid for 30 days. Created only by *`lumen-agents authorize`* and deleted when T3 Code rejects it. |
+| `~/Library/Application Support/Lumen Agents/t3-blocked` | Empty marker saved when T3 Code rejects the token, so the helper stays off until you run *`lumen-agents authorize`*. |
 | `~/Library/Application Support/Lumen Agents/devices.json` | Paired TV names and the key shared with each TV. |
 | `~/Library/Application Support/Lumen Agents/id` | Random helper identifier so the TV recognizes the helper. |
 | `~/Library/Application Support/Lumen Agents/admin` | Random secret for the local helper command. |

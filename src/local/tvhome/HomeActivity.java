@@ -96,6 +96,9 @@ public class HomeActivity extends Activity {
     /** Whether the home screen is in front (agent notifications aren't needed then). */
     static boolean showing;
     private AgentsCard agentsCard;
+    /** The chat whose details are open (showChat), so they close when it's no longer current. */
+    private Sheet chatSheet;
+    private String chatId;
 
     private Sheet sheet;
     private String movingPkg;
@@ -162,6 +165,11 @@ public class HomeActivity extends Activity {
         }
         if (prefs.showNowPlaying) nowPlaying.start();
         showing = true;
+        // Nothing current to show yet (it stopped listening meanwhile): don't keep chats from before.
+        if (agents.last == null) {
+            closeChat();
+            showAgentsCard(false);
+        }
         if (prefs.showAgents) agents.want(AgentStatus.HOME, true);
     }
 
@@ -908,11 +916,23 @@ public class HomeActivity extends Activity {
 
     private void onAgents(AgentStatus.Snapshot s) {
         if (!prefs.showAgents) return;
+        if (chatSheet != null && !(s.active() && listed(s, chatId))) closeChat();
         boolean focused = agentsCard.hasFocus();
         boolean show = prefs.showAgents && agentsCard.bind(s);
         showAgentsCard(show);
         // The focused chat became a line you can't select, like "Mac offline".
         if (focused && show && !agentsCard.hasFocus()) goToStart();
+    }
+
+    private static boolean listed(AgentStatus.Snapshot s, String id) {
+        for (AgentStatus.Chat c : s.chats) if (c.id.equals(id)) return true;
+        return false;
+    }
+
+    private void closeChat() {
+        if (chatSheet != null) chatSheet.dismiss();
+        chatSheet = null;
+        chatId = null;
     }
 
     private void showAgentsCard(boolean show) {
@@ -947,6 +967,8 @@ public class HomeActivity extends Activity {
         if (c.text != null) s.note(c.text, 0xCCFFFFFF);
         s.add("Close", "Reply in T3 Code on your Mac or phone", false, () -> {});
         s.show();
+        chatSheet = s;
+        chatId = c.id;
     }
 
     // ---- Inputs ----------------------------------------------------------------------------
@@ -1094,6 +1116,11 @@ public class HomeActivity extends Activity {
         }
 
         void dismiss() {
+            // Not kept once closed: it holds what the chat last said.
+            if (chatSheet == this) {
+                chatSheet = null;
+                chatId = null;
+            }
             if (sheet != this) return;
             sheet = null;
             root.removeView(scrim);

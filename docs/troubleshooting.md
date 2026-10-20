@@ -153,9 +153,9 @@ Lumen doesn't import Google TV history. Lumen excludes selected music, casting, 
 3. If the command is still absent, [install the helper](set-up-agents.md#install-the-helper).
 4. In your shell's startup file, add the export so future shells can find the command.
 
-## T3 Code isn't running or T3 Code needs a new token
+## T3 Code isn't running or T3 Code access needed
 
-**Cause:** The helper can't find a trusted T3 Code listener, or its read-only session is missing, expired, or rejected. The TV shows **T3 Code isn't running** for *`offline`* and **T3 Code needs a new token** for an authentication state.
+**Cause:** The helper can't find a trusted T3 Code listener, or it has no read-only session: you haven't run *`lumen-agents authorize`* yet, or T3 Code rejected the session because it was revoked or expired. The TV shows **T3 Code isn't running** for *`offline`* and **T3 Code access needed** for *`auth`*. Older TV builds show **T3 Code needs a new token** for *`auth`*. The helper never replaces a rejected session by itself.
 
 1. On your Mac, open the installed T3 Code app. A server run from source doesn't pass the helper's app-binary check.
 2. On your Mac, verify the expected CLI path without running it:
@@ -167,8 +167,14 @@ Lumen doesn't import Google TV history. Lumen excludes selected music, casting, 
    For a custom T3 Code directory, check its *`bin/t3`* instead.
 
 3. If you use a custom directory, repeat [Use a custom T3 Code directory](set-up-agents.md#optional-use-a-custom-t3-code-directory). Setting a shell variable alone doesn't update an existing launchd job.
-4. On your Mac, inspect *`~/Library/Logs/lumen-agents.log`* for **T3 Code's t3 command isn't at** or **t3 auth session issue failed**, followed by the path or exit status. Don't share token files.
-5. After correcting the cause, allow the helper to retry token issuance. It attempts issuance at most once every 10 minutes and renews its 30-day token automatically.
+4. On your Mac, inspect *`~/Library/Logs/lumen-agents.log`* for **T3 Code rejected the token** or **no T3 Code access**. Don't share token files.
+5. For *`auth`*, after correcting the cause, allow access again. The command reports errors such as **T3 Code's t3 command isn't at** or **t3 auth session issue failed**:
+
+   ```sh
+   lumen-agents authorize
+   ```
+
+   For *`offline`*, the helper retries on its own with the same session.
 6. On your Mac, verify recovery:
 
    ```sh
@@ -281,9 +287,10 @@ LUMEN_DRY_RUN=1 ./mac/install.sh purge
 | Command | Behavior |
 | --- | --- |
 | `lumen-agents serve` | Runs the server in the foreground; launchd normally runs this. Don't start a second copy on the installed port. |
-| `lumen-agents pair PAIRING_CODE` | Approves a pending TV pairing. |
+| `lumen-agents authorize` | Creates a read-only **Lumen TV** session with T3 Code's CLI. Needed the first time and after T3 Code rejects the session (revoked or expired). |
+| `lumen-agents pair PAIRING_CODE` | Approves a pending TV pairing; fails without pairing if the key can't be saved. |
 | `lumen-agents devices` | Lists paired TV names and IDs. |
-| `lumen-agents unpair "DEVICE_NAME_OR_ID"` | Removes matching pairings on the Mac; doesn't clear TV data. |
+| `lumen-agents unpair "DEVICE_NAME_OR_ID"` | Removes matching pairings on the Mac; doesn't clear TV data. Exits nonzero if the removal can't be saved. |
 | `lumen-agents unpair all` | Removes all TV pairings on this helper. |
 | `lumen-agents status` | Prints JSON with `t3`, `threads`, and `chats` from the local helper. |
 
@@ -298,8 +305,8 @@ The CLI authenticates to the helper over loopback with a local admin secret. It 
 | `JAVA_HOME` | Used in the quickstart to add JDK 17 to `PATH`; `build.sh` itself invokes `javac` and `keytool` from `PATH`. |
 | `T3CODE_HOME` | T3 Code data directory; defaults to `~/.t3`. Set at helper install time to persist it in launchd. |
 | `LUMEN_DRY_RUN` | Any nonempty value enables installer preview, including for `uninstall` and `purge`. |
-| `LUMEN_AGENTS_PORT` | Helper test-instance TCP port; a valid nonzero UInt16 overrides 47837. Setting the variable disables Bonjour advertising. |
-| `LUMEN_AGENTS_DIR` | Helper test-instance data directory. Setting the variable disables Bonjour advertising. |
+| `LUMEN_AGENTS_PORT` | Helper test-instance TCP port; a valid nonzero UInt16 overrides 47837. Setting the variable disables Bonjour advertising and makes the helper listen on 127.0.0.1 only. |
+| `LUMEN_AGENTS_DIR` | Helper test-instance data directory. Setting the variable disables Bonjour advertising and makes the helper listen on 127.0.0.1 only. |
 
 The two test-instance variables belong to the helper binary, not the installer; the installer doesn't write them into launchd. The CLI and test server must use matching values. The installer requires *`HOME`* to match the account's actual home directory and rejects symlinked application-data, launchd, or log paths, and an unrelated command-link destination.
 
@@ -310,7 +317,7 @@ The two test-instance variables belong to the helper binary, not the installer; 
 | `VERSION` | APK version name and code. Increase the code for each newer APK you install. |
 | `build/`, `lumen.apk` | Generated Android build files and signed APK. |
 | `keys/lumen.jks`, `keys/password` | Signing key and password; keep both for updates. |
-| `~/Library/Application Support/Lumen Agents/` | Helper binary and private `t3-token`, `devices.json`, `id`, and `admin` files. See [Mac data](../PRIVACY.md#mac-data). |
+| `~/Library/Application Support/Lumen Agents/` | Helper binary and private `t3-token`, `t3-blocked`, `devices.json`, `id`, and `admin` files. See [Mac data](../PRIVACY.md#mac-data). |
 | `~/.local/bin/lumen-agents` | Command symlink to the installed helper binary. |
 | `~/Library/LaunchAgents/local.lumen.agents.plist` | Per-user launchd job. |
 | `~/Library/Logs/lumen-agents.log` | Helper standard-error log; redact before sharing. |

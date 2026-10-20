@@ -42,9 +42,17 @@ Replies use AES-GCM encryption and authentication with the same pairing key and 
 
 **Settings > Pair again** on the TV forgets its key and sends a request signed with that key asking the Mac to remove its copy. The Mac command *`lumen-agents unpair`* removes Mac-side pairing keys. Follow [Replace a pairing](docs/set-up-agents.md#replace-a-pairing) for the procedure.
 
+A removal takes effect at once in the running helper. Requests the removed TV is waiting on close without a reply, and other TVs aren't affected. The helper then saves the change. If it can't rewrite *`devices.json`*, it deletes the file, and every TV pairs again after a restart. If it can't do either, *`lumen-agents unpair`* fails and says that the key would return after a restart. Pairing likewise fails, without pairing the TV, if the new key can't be saved.
+
+A TV whose key the Mac no longer accepts shows **Mac offline** and keeps its key. These replies aren't sealed, so anyone on the network could fake one, and only **Pair again** on the TV deletes the key. When the TV stops listening, for example while the screen is off, it discards the last chats it received and asks for current ones before showing the card again. Open chat details and notification cards close when the chat disappears or access ends.
+
 ### T3 Code token and listener check
 
-The helper uses its own read-only T3 Code token with scope *`orchestration:read`*. T3 Code's *`t3`* command issues the token for 30 days; the helper renews it automatically and stores it readable only by your user account.
+The helper uses its own read-only T3 Code token with scope *`orchestration:read`*, stored readable only by your user account. T3 Code's *`t3`* command issues the token for 30 days, and only when you run *`lumen-agents authorize`*. The helper never creates a token by itself, including on first start or when the token file is missing.
+
+When T3 Code rejects the token with HTTP 401 or 403, the helper fails closed: it drops the chats it holds, ignores replies to requests made before the rejection, tells waiting TVs, deletes the token, and saves a *`t3-blocked`* marker. It then stays off across restarts until you run *`lumen-agents authorize`* again. T3 Code returns the same response for revoked and expired sessions, so both need you to authorize again. A token older than 30 days isn't used. When T3 Code is unreachable or its update stream drops, the helper also clears the chats, but it retries with the same token, which T3 Code still checks on every reconnect.
+
+Revoking the **Lumen TV** session cuts off chat data to every paired TV. Unpairing one TV affects only that TV. See [Revoke or allow T3 Code access](docs/set-up-agents.md#revoke-or-allow-t3-code-access).
 
 Before sending the token, the helper checks that the process identified by T3 Code's *`userdata/server-runtime.json`* runs as your user, is a binary inside an app bundle whose name starts with **T3 Code**, and owns the listening socket on the stated port. This prevents another local user from taking the port while T3 Code is closed and receiving the token. The check identifies a process; it isn't cryptographic proof that the peer is T3 Code.
 
@@ -69,6 +77,9 @@ The helper caps connection counts per source and in total, rate-limits pairing r
 - **Check-then-use race:** Another process could, in principle, take the T3 Code port during the short interval between the listener check and the request.
 - **Loopback slots:** Other users on the Mac can consume connection slots reserved for the local command. They can't authenticate, but they can make the command wait.
 - **Replays after a restart:** Each TV's latest request time is stored only in memory. After a helper restart, someone who recorded signed requests from the last 10 minutes could replay them. Replayable operations are status requests, whose replies the recorder can't read, and the request from **Pair again** to drop the TV's key.
+- **Revocation latency:** The helper notices a revocation when T3 Code closes its update stream. T3 Code does that at once, and the helper's reconnect then gets HTTP 401, normally within a few seconds. If T3 Code isn't running, the helper has no chats to share and notices on the next connection. A snapshot request T3 Code accepted just before the revocation can still be delivered once. The TV shows the change on its next reply.
+- **Silent network loss:** A Mac that goes silent without closing the connection, for example when it sleeps or leaves the network, can't be detected at once. The helper answers a waiting TV within about 55 seconds even when nothing changes, so the TV gives up after 60 seconds without a reply, or 4 seconds for a request that should be answered at once. The first failed request clears its chats and shows **Mac offline**. Chats on screen are therefore at most about a minute old. A refused or closed connection clears them at once.
+- **Unsaved removal:** If the helper can neither rewrite nor delete *`devices.json`*, a removed TV's key returns after a restart. *`lumen-agents unpair`* reports this. The TV is still refused until then, and running the same command again after fixing the folder's permissions saves the removal.
 - **One key per pairing:** Requests and replies use the same key rather than separate keys for each direction.
 - **Network debugging:** Leaving ADB network debugging on lets other devices on the network try to connect to the TV. Turn it off after setup.
 - **Notification-listener access:** Android grants Lumen the ability to read notifications, although Lumen ignores their contents. See [TV data and permissions](PRIVACY.md#tv-data-and-permissions).

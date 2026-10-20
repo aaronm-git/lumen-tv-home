@@ -75,7 +75,7 @@ These commands and their output were verified with T3 Code (Beta) 0.1.0.
 
    For a custom *`T3CODE_HOME`*, use that directory's *`bin/t3`* instead.
 
-2. In the session list, find the block with *`client: Lumen TV | bot`*. Each block starts with the session ID on its own line, followed by metadata such as *`client:`*, *`issued:`*, and *`expires:`*. Note the ID from the first line. If there are multiple **Lumen TV** sessions from renewals or reinstalls, repeat revocation for each you want to remove.
+2. In the session list, find the block with *`client: Lumen TV | bot`*. Each block starts with the session ID on its own line, followed by metadata such as *`client:`*, *`issued:`*, and *`expires:`*. Note the ID from the first line. If there are multiple **Lumen TV** sessions from earlier *`lumen-agents authorize`* runs, repeat revocation for each you want to remove.
 3. On your Mac, revoke the session:
 
    ```sh
@@ -83,6 +83,8 @@ These commands and their output were verified with T3 Code (Beta) 0.1.0.
    ```
 
    Replace *`SESSION_ID`* with the ID from the session list. A successful revocation prints *`Revoked session SESSION_ID.`*, with your session ID in place of *`SESSION_ID`*.
+
+   If the helper is still running, it stops sharing chats within a few seconds and doesn't create a new session. Only *`lumen-agents authorize`* does that. See [Revoke or allow T3 Code access](set-up-agents.md#revoke-or-allow-t3-code-access).
 
 ## Verify removal
 

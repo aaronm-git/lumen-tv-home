@@ -68,8 +68,10 @@ final class AgentsCard extends LinearLayout {
                     "On the Mac:  lumen-agents pair " + code));
         } else if (!"ok".equals(s.t3)) {
             head = "AGENTS";
-            lines.add(new Line("t3", "offline".equals(s.t3) ? "T3 Code isn't running" : "T3 Code needs a new token",
-                    "", 0x66FFFFFF, null, "on " + s.mac));
+            // auth: never allowed, or T3 Code rejected the token (revoked or expired). Only you can allow it again.
+            boolean offline = "offline".equals(s.t3);
+            lines.add(new Line("t3", offline ? "T3 Code isn't running" : "T3 Code access needed", "", 0x66FFFFFF,
+                    null, offline ? "on " + s.mac : "On " + s.mac + ":  lumen-agents authorize"));
         } else if (s.chats.isEmpty()) {
             shownStates.clear();
             return false;

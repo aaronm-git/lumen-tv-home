@@ -57,13 +57,21 @@ The verified OS and compiler versions are macOS 27.0 (build 26A428) and Apple Sw
 
    Add this line to your shell's startup file if you want it to persist.
 
-3. In the same shell, verify that the helper can read T3 Code:
+3. In the same shell, allow the helper to read T3 Code:
+
+   ```sh
+   lumen-agents authorize
+   ```
+
+   This runs T3 Code's own *`t3 auth session issue`* once to create a read-only session labeled **Lumen TV**. The helper never creates a session by itself, so until you run this command the TV shows **T3 Code access needed**. Run it again whenever T3 Code stops accepting the session; see [Revoke or allow T3 Code access](#revoke-or-allow-t3-code-access).
+
+4. In the same shell, verify that the helper can read T3 Code:
 
    ```sh
    lumen-agents status
    ```
 
-   In the JSON response, *`t3`* must be *`ok`*. An empty *`chats`* list is valid when no chats need to appear. See [T3 Code isn't running or needs a new token](troubleshooting.md#t3-code-isnt-running-or-t3-code-needs-a-new-token) for other states.
+   In the JSON response, *`t3`* must be *`ok`*. An empty *`chats`* list is valid when no chats need to appear. See [T3 Code isn't running or T3 Code access needed](troubleshooting.md#t3-code-isnt-running-or-t3-code-access-needed) for other states.
 
 ## Turn on Agents on the TV
 
@@ -108,7 +116,13 @@ Use this procedure instead of a default installation, or to update an existing i
 
    Replace *`T3_CODE_DIRECTORY`* with the absolute T3 Code data-directory path. The installer writes *`T3CODE_HOME`* into the launchd job because launchd doesn't inherit your shell's variables. Set it on every reinstall that must retain the custom location.
 
-2. In your Mac's shell, verify the reinstalled helper:
+2. If this is the first installation, or the TV shows **T3 Code access needed**, allow the helper to read T3 Code. The helper runs that directory's *`bin/t3`*:
+
+   ```sh
+   lumen-agents authorize
+   ```
+
+3. In your Mac's shell, verify the reinstalled helper:
 
    ```sh
    lumen-agents status
@@ -131,15 +145,31 @@ Use this procedure instead of a default installation, or to update an existing i
    lumen-agents unpair "DEVICE_NAME_OR_ID"
    ```
 
-   Replace *`DEVICE_NAME_OR_ID`* with a name or ID from the device list. An ID selects one TV; a shared name can match more than one.
+   Replace *`DEVICE_NAME_OR_ID`* with a name or ID from the device list. An ID selects one TV; a shared name can match more than one. The removed TV gets nothing more at once, including a request it's waiting on; other TVs keep working. If the helper can't save the change, the command fails and says so: the key would return when the helper restarts, so fix the permissions of *`~/Library/Application Support/Lumen Agents`* and run it again.
 
 4. On your Mac, run the [pairing procedure](#pair-the-tv) with the new code.
+
+## Revoke or allow T3 Code access
+
+Revoking the **Lumen TV** session cuts off chat data to every paired TV. To keep one TV from seeing chats while the others still do, [unpair](#replace-a-pairing) that TV instead.
+
+1. To revoke, in T3 Code, revoke **Lumen TV** in its list of connected clients, or follow [Revoke the T3 Code session](uninstall.md#revoke-the-t3-code-session).
+
+   T3 Code closes the helper's update stream right away. Within a few seconds the helper drops the chats it holds, tells waiting TVs, deletes the token, and records the rejection in *`t3-blocked`*. The TVs show **T3 Code access needed**. The helper doesn't retry or create a new session, even after a restart.
+
+2. To allow access again, on your Mac, run:
+
+   ```sh
+   lumen-agents authorize
+   ```
+
+T3 Code gives the same answer for a revoked session as for an expired one, so the helper handles both the same way. Sessions last 30 days, so you run *`lumen-agents authorize`* about once a month. A short drop, such as T3 Code restarting, isn't a rejection: the TV shows **T3 Code isn't running** with no chats, and the helper reconnects with the same session.
 
 ## How it works
 
 The helper advertises *`_lumen-agents._tcp`* over Bonjour, normally on port 47837. Lumen discovers it and follows its address changes. The TV keeps a long-poll request open; the helper replies when chat status changes or the wait expires. The helper follows T3 Code's update stream rather than repeatedly fetching the chat list.
 
-The helper issues its own read-only *`orchestration:read`* T3 Code token, labeled **Lumen TV**, with a 30-day lifetime and automatic renewal. Before sending the token to T3 Code's local server, it checks that the process in *`userdata/server-runtime.json`* runs as your user, is an app binary whose name starts with **T3 Code**, and owns the listening socket. This accepts regular and Beta app bundles wherever installed; it doesn't cryptographically authenticate T3 Code.
+The helper uses a read-only *`orchestration:read`* T3 Code token, labeled **Lumen TV**, with a 30-day lifetime. Only *`lumen-agents authorize`* creates one. Before sending the token to T3 Code's local server, it checks that the process in *`userdata/server-runtime.json`* runs as your user, is an app binary whose name starts with **T3 Code**, and owns the listening socket. This accepts regular and Beta app bundles wherever installed; it doesn't cryptographically authenticate T3 Code.
 
 The TV generates a random pairing code. The code isn't sent between the TV and the Mac. The *`lumen-agents`* command submits it to the helper over the Mac's loopback interface at 127.0.0.1. The TV and Mac combine the code with a P-256 ECDH shared secret and both public keys to derive a pairing key. Paired requests are signed with HMAC-SHA256; replies are encrypted and authenticated with AES-GCM and bound to the request time.
 

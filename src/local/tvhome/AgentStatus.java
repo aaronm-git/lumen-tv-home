@@ -111,8 +111,13 @@ final class AgentStatus {
     private final List<Listener> listeners = new ArrayList<>();
     private final Set<String> wanted = new HashSet<>();
     private final Handler main = new Handler(Looper.getMainLooper());
+    /** Started once and kept, so the work below never runs on two threads at once. */
     private HandlerThread thread;
-    /** Set while running; everything below is only touched on this thread. */
+    /**
+     * Set while running, and new each start and each Pair again: work and replies for an older one are dropped, so a
+     * request still on its way when we stopped can't show its chats later. Everything below is only touched on the
+     * thread.
+     */
     private volatile Handler worker;
     private NsdManager.DiscoveryListener discovery;
     private boolean resolving;
@@ -152,22 +157,33 @@ final class AgentStatus {
     }
 
     private void start() {
-        if (thread != null) return;
-        thread = new HandlerThread("agents");
-        thread.start();
+        if (worker != null) return;
+        if (thread == null) {
+            thread = new HandlerThread("agents");
+            thread.start();
+        }
         Handler w = new Handler(thread.getLooper());
         worker = w;
-        w.post(() -> poll(w));
+        w.post(() -> {
+            // Ask for the current chats at once rather than waiting for a change since we stopped.
+            version = -1;
+            poll(w);
+        });
     }
 
     private void stop() {
-        if (thread == null) return;
         Handler w = worker;
+        if (w == null) return;
         worker = null;
-        w.post(this::stopDiscovery);
-        thread.quitSafely();
-        thread = null;
-        // Let go of a request the Mac is holding open (closing it is network work, so not on this thread).
+        w.removeCallbacksAndMessages(null);
+        new Handler(thread.getLooper()).post(this::stopDiscovery);
+        // Not kept while nobody listens: whatever comes next must be current, not chats from before.
+        last = null;
+        letGo();
+    }
+
+    /** Lets go of a request the Mac is holding open (closing it is network work, so not on this thread). */
+    private void letGo() {
         HttpURLConnection c = waiting;
         if (c != null) new Thread(c::disconnect).start();
     }
@@ -181,14 +197,18 @@ final class AgentStatus {
      * request pairs with a new code.
      */
     void pairAgain() {
-        Handler w = worker;
-        if (w == null) {
+        Handler old = worker;
+        if (old == null) {
             String host = sp.getString("host", null), device = sp.getString("device", null);
             String key = sp.getString("key", null);
             forget();
             new Thread(() -> revoke(host, device, key)).start();
             return;
         }
+        // A new worker, so a reply to a request made with the old key isn't shown after this.
+        old.removeCallbacksAndMessages(null);
+        Handler w = new Handler(thread.getLooper());
+        worker = w;
         w.post(() -> {
             if (w != worker) return;
             String host = sp.getString("host", null), device = sp.getString("device", null);
@@ -196,11 +216,9 @@ final class AgentStatus {
             forget();
             revoke(host, device, key);
             failures = 0;
-            w.removeCallbacksAndMessages(null);
             poll(w);
         });
-        HttpURLConnection c = waiting;
-        if (c != null) new Thread(c::disconnect).start();
+        letGo();
     }
 
     private void forget() {
@@ -257,35 +275,42 @@ final class AgentStatus {
         try {
             if (host == null) {
                 next = RETRY_MS;
-                search();
+                search(w);
             } else if (sp.getString("key", null) == null) {
-                pair(host);
+                pair(w, host);
             } else {
-                next = status(host);
+                next = status(w, host);
             }
         } catch (IOException | JSONException | GeneralSecurityException | RuntimeException e) {
+            // Stopped or Pair again meanwhile: whatever went wrong belongs to that older worker.
+            if (w != worker) return;
             // The Mac may be asleep or have a new address: look for it again, but keep trying the old one.
             // (RuntimeException: whatever arrives, from a spoofed helper too, mustn't crash the launcher.)
             version = -1;
-            if (++failures >= 2) {
-                search();
-                publish(new Snapshot(OFFLINE, sp.getString("mac", "Mac"), null, null, Collections.emptyList()));
+            ++failures;
+            if (failures >= 2) search(w);
+            // Once paired, chats we can't confirm aren't shown: the first failure clears them. Before that a
+            // second try keeps a hiccup from interrupting the code on screen.
+            if (failures >= 2 || paired()) {
+                publish(w, new Snapshot(OFFLINE, sp.getString("mac", "Mac"), null, null, Collections.emptyList()));
             }
             next = failures >= 2 ? RETRY_MS : POLL_MS;
         }
-        w.postDelayed(() -> poll(w), next);
+        if (w == worker) w.postDelayed(() -> poll(w), next);
     }
 
     /** Returns how long to wait before asking again. */
-    private long status(String host) throws IOException, JSONException, GeneralSecurityException {
+    private long status(Handler w, String host) throws IOException, JSONException, GeneralSecurityException {
         byte[] key = Base64.decode(sp.getString("key", ""), Base64.NO_WRAP);
         if (key.length != 32) throw new GeneralSecurityException("bad key");
         String time = String.valueOf(System.currentTimeMillis());
         long asked = SystemClock.elapsedRealtime();
         String target = version >= 0 ? "/status?wait=" + version : "/status";
         HttpURLConnection c = open(host, target);
-        // The Mac holds the reply for up to 45 s when nothing has changed.
-        c.setReadTimeout(75_000);
+        // The Mac holds a waiting reply for 45 s, up to 55 s by its 10 s tick, when nothing has changed. A Mac that
+        // goes silent (asleep, off the network) is noticed when this runs out, so the chats on screen are at most
+        // about a minute old; the first failure clears them (poll). An asking-at-once request keeps open()'s 4 s.
+        if (version >= 0) c.setReadTimeout(60_000);
         waiting = c;
         try {
             c.setRequestProperty("X-Lumen-Device", sp.getString("device", ""));
@@ -294,6 +319,8 @@ final class AgentStatus {
                     hex(hmac(key, ("GET " + target + "\n" + time).getBytes(StandardCharsets.UTF_8))));
             int code = c.getResponseCode();
             byte[] box = readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
+            // Stopped or Pair again while this was on its way: it changes nothing and isn't shown.
+            if (w != worker) return POLL_MS;
             if ((code == 401 || code == 403) && !paired()) {
                 // Not approved yet: the Mac can't seal anything until the code is typed there, so these are plain.
                 // Forged ones can only delay pairing.
@@ -303,12 +330,13 @@ final class AgentStatus {
                     // The request expired, or the Mac restarted: start over with a new code.
                     forget();
                 } else {
-                    publish(new Snapshot(PAIRING, sp.getString("mac", "Mac"), sp.getString("code", ""), null,
+                    publish(w, new Snapshot(PAIRING, sp.getString("mac", "Mac"), sp.getString("code", ""), null,
                             Collections.emptyList()));
                 }
                 return POLL_MS;
             }
-            // Anything else is a failure (offline), never a reason to drop the key.
+            // Anything else is a failure (offline, at once once paired: see poll), never a reason to drop the key:
+            // these aren't sealed, so anyone could send them.
             if (code != 200) throw new IOException("HTTP " + code);
             // AES-GCM: nonce, then ciphertext and tag. Anything not sealed with our key fails here.
             if (box.length < 28) throw new IOException("not sealed");
@@ -326,7 +354,7 @@ final class AgentStatus {
             if (!paired() || !mac.equals(sp.getString("mac", null))) {
                 sp.edit().putBoolean("paired", true).putString("mac", mac).apply();
             }
-            publish(new Snapshot(READY, mac, null, o.optString("t3", "ok"), chats));
+            publish(w, new Snapshot(READY, mac, null, o.optString("t3", "ok"), chats));
             long v = o.optLong("version", -1);
             boolean changed = v != version;
             version = v;
@@ -342,7 +370,7 @@ final class AgentStatus {
      * Agrees a secret with the Mac (P-256 ECDH) and makes a random code that never goes over the network. The key
      * needs both, so only a Mac you typed the code into (lumen-agents pair <code>) can read or sign anything.
      */
-    private void pair(String host) throws IOException, JSONException, GeneralSecurityException {
+    private void pair(Handler w, String host) throws IOException, JSONException, GeneralSecurityException {
         KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
         g.initialize(new ECGenParameterSpec("secp256r1"));
         KeyPair mine = g.generateKeyPair();
@@ -365,6 +393,7 @@ final class AgentStatus {
         } finally {
             c.disconnect();
         }
+        if (w != worker) return;
 
         byte[] macDer = Base64.decode(reply.getString("key"), Base64.NO_WRAP);
         if (macDer.length > 200) throw new GeneralSecurityException("bad key");
@@ -394,16 +423,16 @@ final class AgentStatus {
                 .putBoolean("paired", false)
                 .apply();
         failures = 0;
-        publish(new Snapshot(PAIRING, mac, code.toString(), null, Collections.emptyList()));
+        publish(w, new Snapshot(PAIRING, mac, code.toString(), null, Collections.emptyList()));
     }
 
     // ---- Finding the Mac -------------------------------------------------------------------
 
-    private void search() {
+    private void search(Handler w) {
         if (searchingSince == 0) searchingSince = SystemClock.elapsedRealtime();
         if (sp.getString("host", null) == null) {
             boolean waited = SystemClock.elapsedRealtime() - searchingSince > SEARCH_MS;
-            publish(new Snapshot(waited ? OFFLINE : SEARCHING, sp.getString("mac", "Mac"), null, null,
+            publish(w, new Snapshot(waited ? OFFLINE : SEARCHING, sp.getString("mac", "Mac"), null, null,
                     Collections.emptyList()));
         }
         if (discovery != null) return;
@@ -496,8 +525,8 @@ final class AgentStatus {
         if (w != null) w.post(r);
     }
 
-    private void publish(Snapshot s) {
-        Handler w = worker;
+    /** Shown only if w (the worker that got it) is still the current one when it reaches the main thread. */
+    private void publish(Handler w, Snapshot s) {
         main.post(() -> {
             if (w != worker || w == null) return;
             last = s;
