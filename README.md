@@ -6,6 +6,8 @@ Lumen is an experimental home-screen launcher for Android TVs with local watch h
 
 Lumen is a personal project, currently version 0.1.0, available only as source. You must build it yourself; there is no official APK. Its current package name, `local.tvhome`, will change before an official binary release, so a later official build won't install over your self-built app.
 
+**Quick start:** [Set up Lumen with your AI coding agent](docs/ai-agent-setup.md) (recommended).
+
 ## Why I built this
 
 I love coding, but my career and my work don't require crazy focus or frontier models, thankfully. So I let my agents do work for my company while I delegate tasks and watch TV or play games. It also helps me get the most out of my inference subscriptions: my agents keep working even when I'm away from my desk. Lumen tells me, on the TV, when one of them finishes, fails, or needs me.
