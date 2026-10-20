@@ -21,6 +21,10 @@ import java.util.Map;
  * while you're in another app, a small card appears over it (see AgentAlert). Only while the TV is on.
  */
 public class HomeKeyService extends AccessibilityService {
+    /**
+     * Google TV's home screen (and its .home.HomeActivity below; also in res/xml/home_key_service.xml). Other
+     * Android TV devices are untested; there the normal default-home choice may work without this service.
+     */
     private static final String STOCK_HOME = "com.google.android.apps.tv.launcherx";
 
     private AgentStatus agents;

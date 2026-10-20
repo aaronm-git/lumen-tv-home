@@ -44,6 +44,7 @@ import java.util.concurrent.Executors;
  * with a glow that follows your focus.
  */
 public class HomeActivity extends Activity {
+    /** First launch only. US streaming apps (Apple TV's is Sony's build); any that aren't installed are skipped. */
     private static final String[] DEFAULT_FAVORITES = {
             "com.google.android.youtube.tv",
             "com.netflix.ninja",
@@ -53,6 +54,7 @@ public class HomeActivity extends Activity {
             "com.apple.atve.sony.appletv",
             "com.spotify.tv.android",
     };
+    /** Sony's Live TV app. Inputs leaves it out on TVs that don't have it. */
     private static final String LIVE_TV = "com.sony.dtv.tvx";
     private static final int SIDE = 56;
     private static final int MAX_SHOWS = 10;
@@ -763,8 +765,8 @@ public class HomeActivity extends Activity {
             if (prefs.showAgents && agents.last != null) onAgents(agents.last);
             else showAgentsCard(false);
         });
-        s.add("Agent notifications", prefs.agentAlerts ? "On  ·  over other apps when a chat finishes or needs you"
-                : "Off", false, () -> {
+        s.add("Agent notifications", prefs.agentAlerts
+                ? "On  ·  a chat's title over other apps when it finishes or needs you" : "Off", false, () -> {
             prefs.agentAlerts = !prefs.agentAlerts;
             prefs.save();
         });
@@ -779,6 +781,16 @@ public class HomeActivity extends Activity {
         }
         s.add("TV settings", "Picture, sound, network and more", false,
                 () -> start(new Intent(Settings.ACTION_SETTINGS)));
+        s.add("Licenses & notices", "Lumen, the model logos and trademarks", false, this::showNotices);
+        s.show();
+    }
+
+    private void showNotices() {
+        Sheet s = new Sheet("Licenses & notices");
+        s.notice("Lumen", getString(R.string.notice_lumen));
+        s.notice("Model logos", getString(R.string.notice_logos));
+        s.notice("Trademarks", getString(R.string.notice_trademarks));
+        s.notice("MIT License", getString(R.string.notice_mit));
         s.show();
     }
 
@@ -891,11 +903,12 @@ public class HomeActivity extends Activity {
     }
 
     private String agentsSetting() {
-        if (!prefs.showAgents) return "Off";
+        // Chat titles, projects and what a chat last said come from the Mac and show on the TV.
+        if (!prefs.showAgents) return "Off  ·  shows T3 Code chats from a Mac running Lumen Agents";
         AgentStatus.Snapshot s = agents.last;
         if (s != null && s.phase == AgentStatus.PAIRING) return "On  ·  pair with code " + AgentStatus.grouped(s.code);
-        if (agents.paired() && s != null) return "On  ·  T3 Code chats from " + s.mac;
-        return "On  ·  T3 Code chats from your Mac (Lumen Agents)";
+        String from = agents.paired() && s != null ? s.mac : "your Mac (Lumen Agents)";
+        return "On  ·  chat titles, projects and replies from " + from;
     }
 
     /** There's no T3 Code on the TV, so OK just shows what the chat is up to. */
@@ -1017,6 +1030,8 @@ public class HomeActivity extends Activity {
             if (detail != null) {
                 TextView b = text(12, 0, "sans-serif");
                 b.setShadowLayer(0, 0, 0, 0);
+                b.setSingleLine(false);
+                b.setMaxLines(2);
                 b.setText(detail);
                 b.setTextColor(Ui.onPillDetail());
                 b.setDuplicateParentStateEnabled(true);
@@ -1032,8 +1047,18 @@ public class HomeActivity extends Activity {
             list.addView(item, lp);
         }
 
+        /** A heading and a long text, such as a license. Focusable, so the remote scrolls through them. */
+        void notice(String title, String text) {
+            add(title, text, false, () -> {});
+            TextView b = (TextView) ((ViewGroup) list.getChildAt(list.getChildCount() - 1)).getChildAt(1);
+            b.setMaxLines(Integer.MAX_VALUE);
+            b.setLineSpacing(0, 1.15f);
+        }
+
         void show() {
-            if (list.getChildCount() > 6) {
+            list.measure(View.MeasureSpec.makeMeasureSpec(dp(368), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.UNSPECIFIED);
+            if (list.getChildCount() > 6 || list.getMeasuredHeight() > dp(420)) {
                 scroll.setLayoutParams(new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(340)));
             }

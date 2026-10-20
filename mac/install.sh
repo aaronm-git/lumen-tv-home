@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds Lumen Agents and runs it in the background on this Mac (a launchd agent that starts at login).
 #   ./mac/install.sh            build, install and (re)start
-#   ./mac/install.sh uninstall  stop it and remove it (pairings and the T3 token are kept)
+#   ./mac/install.sh uninstall  stop it and remove it (pairings, the T3 token and the log are kept)
+#   ./mac/install.sh purge      uninstall, and also delete the token, pairings, admin secret and log
 set -eu
 cd "$(dirname "$0")"
 APP="$HOME/Library/Application Support/Lumen Agents"
@@ -10,12 +11,26 @@ PLIST="$HOME/Library/LaunchAgents/local.lumen.agents.plist"
 LOG="$HOME/Library/Logs/lumen-agents.log"
 DOMAIN="gui/$(id -u)"
 
+case "${1:-}" in
+    ""|uninstall|purge) ;;
+    *) echo "usage: $0 [uninstall|purge]" >&2; exit 1 ;;
+esac
+
 launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
-if [ "${1:-}" = uninstall ]; then
-    rm -f "$PLIST" "$BIN" "$HOME/.local/bin/lumen-agents"
-    echo "Removed Lumen Agents. Revoke its T3 token in T3 Code's connections list (Lumen TV)."
-    exit 0
-fi
+case "${1:-}" in
+    uninstall|purge)
+        rm -f "$PLIST" "$BIN" "$HOME/.local/bin/lumen-agents"
+        if [ "$1" = purge ]; then
+            rm -rf "$APP" "$LOG"
+            echo "Removed Lumen Agents with its token, pairings and log."
+        else
+            echo "Removed Lumen Agents. Its token, pairings and log are kept (./mac/install.sh purge deletes them)."
+        fi
+        echo "Revoke its T3 Code session too: Lumen TV in T3 Code's connections, or"
+        echo "  ~/.t3/bin/t3 auth session list   then   ~/.t3/bin/t3 auth session revoke <id>"
+        echo "The TV's copy of its key goes when you uninstall Lumen or clear its storage."
+        exit 0 ;;
+esac
 
 mkdir -p "$APP" "$HOME/Library/LaunchAgents" "$HOME/.local/bin" "$HOME/Library/Logs"
 chmod 700 "$APP"
@@ -26,6 +41,11 @@ chmod 600 "$LOG"
 swiftc -O -swift-version 5 -o "$BIN" LumenAgents.swift
 ln -sf "$BIN" "$HOME/.local/bin/lumen-agents"
 
+# launchd doesn't see your shell's variables, so a custom T3 Code location goes into the job.
+ENVVARS=
+if [ -n "${T3CODE_HOME:-}" ]; then
+    ENVVARS="<key>EnvironmentVariables</key><dict><key>T3CODE_HOME</key><string>$T3CODE_HOME</string></dict>"
+fi
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,6 +60,7 @@ cat > "$PLIST" <<PLIST
     <key>LowPriorityIO</key><true/>
     <key>Umask</key><integer>63</integer>
     <key>StandardErrorPath</key><string>$LOG</string>
+    $ENVVARS
 </dict>
 </plist>
 PLIST

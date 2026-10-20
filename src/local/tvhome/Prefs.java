@@ -31,8 +31,8 @@ final class Prefs {
         layout = sp.getString("layout", "rows");
         showContinue = sp.getBoolean("showContinue", true);
         showNowPlaying = sp.getBoolean("showNowPlaying", true);
-        showAgents = sp.getBoolean("showAgents", true);
-        agentAlerts = sp.getBoolean("agentAlerts", true);
+        showAgents = sp.getBoolean("showAgents", agentsDefault(c));
+        agentAlerts = sp.getBoolean("agentAlerts", agentsDefault(c));
     }
 
     void save() {
@@ -58,7 +58,16 @@ final class Prefs {
 
     /** For the Home button service, which shows agent notifications. */
     static boolean agentAlerts(Context c) {
-        return shared(c).getBoolean("agentAlerts", true);
+        return shared(c).getBoolean("agentAlerts", agentsDefault(c));
+    }
+
+    /**
+     * Agents talk to the network and show chat text on the TV, so they start off. A TV that already has a
+     * key from the Mac (paired before this default existed) keeps them on.
+     */
+    private static boolean agentsDefault(Context c) {
+        SharedPreferences agents = c.getSharedPreferences("agents", Context.MODE_PRIVATE);
+        return agents.getBoolean("paired", false) || agents.contains("key");
     }
 
     private static List<String> split(String s) {

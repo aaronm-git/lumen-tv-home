@@ -4,7 +4,11 @@
 // list over HTTP, then follows the server's shell stream so it only wakes when a chat changes. The TV finds it over
 // Bonjour (_lumen-agents._tcp) and must be paired once: the TV shows a code that never goes over the network, and
 // typing it here completes the key. Requests are signed and replies encrypted with that key, so other devices on the
-// network can neither read nor fake them.
+// network shouldn't be able to read or fake them (see SECURITY.md for what this does and doesn't cover).
+//
+// Lumen Agents is an unofficial integration with T3 Code and is not affiliated with or endorsed by T3 Tools, Inc.
+// It uses an internal, undocumented interface that may change without notice. Tested with T3 Code (Beta) 0.1.0,
+// x-t3-orchestration-protocol: 2.
 //
 //   lumen-agents serve          run the helper (launchd does this)
 //   lumen-agents pair <code>    approve the TV showing that code (K7QM-9XRT-4HNP-2WVD; any case, dashes optional)
