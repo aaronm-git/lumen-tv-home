@@ -1,50 +1,78 @@
 # Lumen
 
-A home screen for the BRAVIA, built from scratch with Claude Code on 2026-10-19.
+This page shows you how to get started with Lumen and find its setup, privacy, and support documentation.
 
-- Big clock, date and a greeting (holidays included).
-- **Now playing** card (top right): artwork, title and app of whatever is playing or paused, with
-  play/pause. OK opens the app's player. Hidden when nothing is playing.
-- **Continue watching**: the last 10 shows and movies you played, with artwork, episode, app and a
-  progress bar. Home lands on it, so OK goes straight back to what you just left (the exact player
-  while the app still has it open, otherwise the app). Lumen builds this list itself as you watch:
-  Android doesn't let non-Google apps read Google TV's own list. Music, casting and Live TV are left out.
-- Two layouts (Settings): **Rows** (Continue watching, Favorites, Apps) or **Grid** (Continue watching,
-  then every app five across, Apple TV style). The page scrolls and the clock slides away as you go down.
-- Every installed TV app shows up automatically, using its own banner.
-- The background glows in the colour of whichever app is focused.
-- **Inputs** lists the HDMI ports by device name (via HDMI-CEC) and says what's plugged in.
-- Hold **OK** on any app to add/remove it from Favorites, move it, hide it, or open App info.
-  Changes are saved on the TV.
-- No internet access, no background work, no tracking. About 50 MB of memory (Projectivy: ~97 MB).
+Lumen is an experimental home-screen launcher for Android TVs with local watch history and optional coding-agent status.
 
-Continue watching and Now playing need one permission, which `build.sh` grants over ADB:
-notification-listener access. Android only shares media sessions with listeners; Lumen's ignores every
-notification. Watch history (titles, progress and small thumbnails) stays on the TV in Lumen's private
-storage, and can be cleared or switched off in Settings.
+Lumen is a personal project, currently version 0.1.0, available only as source. You must build it yourself; there is no official APK. Its current package name, `local.tvhome`, will change before an official binary release, so a later official build won't install over your self-built app.
 
-Plain Android framework code with no libraries, built without Gradle.
+## Features
 
-## Build and install
+- See a clock, date, and greeting, including holiday greetings.
+- Use **Now playing** to see artwork, a title, and the app for playing or paused media. Select its play/pause button to control playback, or press **OK** on the card to open the player. The card hides when nothing is playing or paused.
+- Return to the latest 10 shows and movies in **Continue watching**, with artwork, episode information, and progress. Lumen builds its own history as you watch; it can't read Google TV's list. Lumen excludes selected music, casting, and live-TV apps. Other apps that publish media sessions can appear in watch history. Home focuses this row when it has shows.
+- Choose **Settings > Rows** for separate favorites and app rows, or **Settings > Grid** for apps five across.
+- Find installed TV apps automatically with their own banners. Press and hold **OK** on an app for favorite, move, hide, and app-information options. See [Customize your home screen](docs/quickstart.md#customize-your-home-screen) for the available actions.
+- Select **Inputs** to see HDMI ports, connected-device names from HDMI-CEC, and connection status.
+- See the background color change with the focused app.
+- Optionally show T3 Code chat status and notifications from your Mac. Both features start off on new installs. See [Set up Lumen Agents](docs/set-up-agents.md#before-you-begin).
+- Use Lumen without analytics or tracking. The app uses about 50 MB of memory (measured with `dumpsys meminfo` on the tested TV).
 
-```sh
-./build.sh 192.168.4.127:5555   # builds lumen.apk and installs it
-```
+Lumen uses the Android framework without libraries or Gradle.
 
-Needs the Android SDK (build-tools 36.0.0, platform 34) and a JDK. The signing key is created on the first
-build in `keys/`; keep it, because updates must be signed with the same key.
+## Status and compatibility
 
-## Make it the Home button
+| Area | Compatibility |
+| --- | --- |
+| Android | Minimum Android 9 (API 28); target API 31. |
+| Tested TV | One Sony BRAVIA with Google TV running Android 12 (API 31). Other TVs and Android TV builds are untested. |
+| Home button | The accessibility service assumes the Google TV launcher, `com.google.android.apps.tv.launcherx`. |
+| Live TV | The **Live TV** input appears only when Sony's Live TV app is installed. |
+| Initial favorites | US streaming apps; Lumen skips apps that aren't installed. You can change favorites with the remote. Source builds define defaults in `DEFAULT_FAVORITES` in `src/local/tvhome/HomeActivity.java`. |
+| Build tools | Android SDK build-tools 36.0.0, platform 34, platform-tools, and JDK 17. |
+| Lumen Agents | macOS only; tested with T3 Code (Beta) 0.1.0 and orchestration protocol 2. |
 
-Google TV ignores the normal default-home setting, so Lumen (like Projectivy) catches the Home button with
-an accessibility service that only listens for the Home key and the stock home screen appearing.
+Lumen Agents is an unofficial integration with T3 Code and is not affiliated with or endorsed by T3 Tools, Inc. It uses an internal, undocumented interface that may change without notice.
 
-```sh
-./set-home.sh lumen        # Home opens Lumen
-./set-home.sh projectivy   # re-enables Projectivy and makes it Home again
-```
+## Screenshots
 
-## Customise
+The screenshot files are planned for the following locations:
 
-- Starting favourites (first launch only): `DEFAULT_FAVORITES` in `HomeActivity.java`.
-- Remove it completely: `adb uninstall local.tvhome` after switching back to Projectivy.
+![Lumen Agents card showing T3 Code chat status](docs/screenshots/agents-card.png)
+
+![Lumen agent notification over another app](docs/screenshots/notification.png)
+
+## Get started
+
+Before you run a setup procedure, check its **Before you begin** section.
+
+- [Build and install Lumen](docs/quickstart.md#before-you-begin).
+- [Pair Lumen with your Mac](docs/set-up-agents.md#before-you-begin).
+- [Diagnose setup and runtime problems](docs/troubleshooting.md#before-you-begin).
+- [Restore your launcher and remove Lumen](docs/uninstall.md#before-you-begin).
+
+## Privacy and security
+
+Watch history stays on your TV. Lumen makes no network connections when Agents and agent notifications are off. With either feature on, it connects to the helper on your Mac over your local network.
+
+- [Review TV and Mac storage and permissions](PRIVACY.md#tv-data-and-permissions).
+- [Understand pairing and security limitations](SECURITY.md#security-design).
+- [Report a vulnerability privately](SECURITY.md#report-a-vulnerability).
+
+## Contribute
+
+Read the [contribution prerequisites](CONTRIBUTING.md#before-you-begin), [code conventions](CONTRIBUTING.md#code-conventions), and [bug-reporting instructions](CONTRIBUTING.md#report-a-bug).
+
+## Support the project
+
+Lumen is free. If it's useful to you, you can [buy me a coffee](https://buymeacoffee.com/aaronmolina).
+
+## License and notices
+
+Lumen is released under the [MIT License](LICENSE), Copyright (c) 2026 Aaron Molina. The model logos in `res/drawable/brand_*.xml` are adapted from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, Copyright (c) 2023 LobeHub). See [third-party notices](THIRD_PARTY_NOTICES.md). You can also read the notices in **Settings > Licenses & notices**.
+
+Product names and logos, including Anthropic and Claude, OpenAI, xAI and Grok, Google, Gemini, Google TV, Android and YouTube, Cursor and Anysphere, OpenCode, T3 Code, Sony and BRAVIA, Netflix, and others mentioned here, belong to their respective owners. They identify the model or app; the MIT License grants no trademark rights. Lumen isn't affiliated with or endorsed by any of them.
+
+## What's next
+
+Follow [Quickstart: Install Lumen](docs/quickstart.md#objectives).

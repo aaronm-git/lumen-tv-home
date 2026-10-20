@@ -54,7 +54,7 @@ final class WatchRecorder implements NowPlaying.Listener {
         if (key != null && key.equals(activeKey)) return;  // Same thing, still playing.
 
         // Paused, stopped or switched to something else: keep where it got to.
-        if (recorded != null) history.progress(recorded, position(), duration());
+        saveProgress();
         handler.removeCallbacks(tick);
         activeKey = key;
         active = key != null ? c : null;
@@ -65,7 +65,7 @@ final class WatchRecorder implements NowPlaying.Listener {
     }
 
     void stop() {
-        if (recorded != null) history.progress(recorded, position(), duration());
+        saveProgress();
         handler.removeCallbacks(tick);
         active = null;
         activeKey = null;
@@ -85,6 +85,11 @@ final class WatchRecorder implements NowPlaying.Listener {
             history.progress(recorded, position(), duration());
         }
         handler.postDelayed(tick, TICK_MS);
+    }
+
+    /** Nothing is written while Continue watching is off. */
+    private void saveProgress() {
+        if (recorded != null && Prefs.continueWatching(context)) history.progress(recorded, position(), duration());
     }
 
     /** Where playback is now, allowing for time passed since the app last reported it. */

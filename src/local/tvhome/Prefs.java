@@ -17,6 +17,10 @@ final class Prefs {
     String layout;
     boolean showContinue;
     boolean showNowPlaying;
+    /** T3 Code chats from the Lumen Agents helper on the Mac. */
+    boolean showAgents;
+    /** A card over other apps when a chat finishes, fails or needs you. */
+    boolean agentAlerts;
     private final SharedPreferences sp;
 
     Prefs(Context c, String[] defaultFavorites) {
@@ -27,6 +31,8 @@ final class Prefs {
         layout = sp.getString("layout", "rows");
         showContinue = sp.getBoolean("showContinue", true);
         showNowPlaying = sp.getBoolean("showNowPlaying", true);
+        showAgents = sp.getBoolean("showAgents", agentsDefault(c));
+        agentAlerts = sp.getBoolean("agentAlerts", agentsDefault(c));
     }
 
     void save() {
@@ -36,12 +42,32 @@ final class Prefs {
                 .putString("layout", layout)
                 .putBoolean("showContinue", showContinue)
                 .putBoolean("showNowPlaying", showNowPlaying)
+                .putBoolean("showAgents", showAgents)
+                .putBoolean("agentAlerts", agentAlerts)
                 .apply();
+    }
+
+    static SharedPreferences shared(Context c) {
+        return c.getSharedPreferences("home", Context.MODE_PRIVATE);
     }
 
     /** For the background recorder, which has no Prefs of its own. */
     static boolean continueWatching(Context c) {
-        return c.getSharedPreferences("home", Context.MODE_PRIVATE).getBoolean("showContinue", true);
+        return shared(c).getBoolean("showContinue", true);
+    }
+
+    /** For the Home button service, which shows agent notifications. */
+    static boolean agentAlerts(Context c) {
+        return shared(c).getBoolean("agentAlerts", agentsDefault(c));
+    }
+
+    /**
+     * Agents talk to the network and show chat text on the TV, so they start off. A TV that already has a
+     * key from the Mac (paired before this default existed) keeps them on.
+     */
+    private static boolean agentsDefault(Context c) {
+        SharedPreferences agents = c.getSharedPreferences("agents", Context.MODE_PRIVATE);
+        return agents.getBoolean("paired", false) || agents.contains("key");
     }
 
     private static List<String> split(String s) {
