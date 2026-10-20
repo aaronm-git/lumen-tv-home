@@ -6,6 +6,12 @@ Lumen is an experimental home-screen launcher for Android TVs with local watch h
 
 Lumen is a personal project, currently version 0.1.0, available only as source. You must build it yourself; there is no official APK. Its current package name, `local.tvhome`, will change before an official binary release, so a later official build won't install over your self-built app.
 
+## Why I built this
+
+I love coding, but my career and my work don't require crazy focus or frontier models, thankfully. So I let my agents do work for my company while I delegate tasks and watch TV or play games. It also helps me get the most out of my inference subscriptions: my agents keep working even when I'm away from my desk. Lumen tells me, on the TV, when one of them finishes, fails, or needs me.
+
+![A T3 Code notification appearing over a game on the TV](docs/screenshots/playing-helldivers.jpg)
+
 ## Features
 
 - See a clock, date, and greeting, including holiday greetings.
@@ -35,8 +41,6 @@ Lumen uses the Android framework without libraries or Gradle.
 Lumen Agents is an unofficial integration with T3 Code and is not affiliated with or endorsed by T3 Tools, Inc. It uses an internal, undocumented interface that may change without notice.
 
 ## Screenshots
-
-The screenshot files are planned for the following locations:
 
 ![Lumen Agents card showing T3 Code chat status](docs/screenshots/agents-card.png)
 
