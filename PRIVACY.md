@@ -1,56 +1,87 @@
 # Privacy
 
-Lumen has no analytics, tracking, ads or accounts, and sends nothing to its author or any other service.
+This page shows you how to review Lumen's data storage and permissions and remove stored information.
 
-## On the TV
+Lumen has no analytics, tracking, ads, or accounts. It sends nothing to its author or any other service.
 
-- **Watch history.** To build Continue watching, Lumen records what you play: titles, episode, app, progress and
-  a small thumbnail per show. It keeps the last 20 shows and shows the latest 10. It's kept in Lumen's private app
-  storage on the TV, which other apps can't read. Clear it in Settings (**Clear watch history**), stop it by turning
-  **Continue watching** off (nothing is recorded or updated while it's off, and what's already there is kept until
-  you clear it), or remove it by clearing Lumen's storage or uninstalling Lumen. Music, casting and Live TV aren't
-  recorded.
-- **Favourites, hidden apps and settings** are kept in the same private storage.
-- **Agents pairing.** Once you pair with a Mac, Lumen keeps its pairing key, the pairing code, a device id made from
-  its key, the Mac's name, the helper's id and its address on your network, and whether pairing finished, in the
-  same private storage. **Pair again** deletes the key, code and device id (and asks the Mac to drop its copy of
-  the key); the Mac's name, id and address stay until the next pairing replaces them. Clearing Lumen's storage
-  (Clear data under Apps › Lumen in the TV's Settings) or uninstalling Lumen removes all of it.
-- **Notification-listener access.** Android only shares media sessions (what's playing) with apps that have
-  notification-listener access, so Lumen asks for it. Lumen uses it only for media sessions and ignores the
-  contents of notifications, but note that Android grants listeners broader access: an app with it could read
-  your notifications. You can revoke it at any time (see the README); Now playing and Continue watching then stop.
-- **Accessibility service.** Used to catch the Home button and to draw agent notifications. It can't read window
-  contents, only receives window events from Google TV's home screen, and passes every key except Home straight
-  on. Lumen does not read or collect anything on screen.
+## Before you begin
 
-## Network
+- Distinguish TV storage from Mac storage. Clearing one doesn't remove data from the other.
+- Before granting access, review the notification-listener and accessibility permissions below.
+- Before removing data, check the [removal procedure](docs/uninstall.md#before-you-begin) and its data-loss consequences.
 
-Lumen only uses the network for the optional Agents feature, and only to talk to the Lumen Agents helper on your
-own Mac on the local network. With Agents and agent notifications off (the default for new
-installs), Lumen makes no network connections. When either is on, and only while the TV is awake (and, for the card, while Lumen is showing), the TV
-looks for the helper with Bonjour on the local network and keeps one request open to it. The TV sends its model
-name (as Android reports it) when pairing so you can tell TVs apart on the Mac.
+## TV data and permissions
 
-The chat titles, project names, model names and the last message of T3 Code chats that the helper sends are shown
-on the TV screen, so anyone in the room can see them. They're kept in memory only, not saved on the TV.
+### Watch history
 
-## On the Mac (Lumen Agents)
+To build **Continue watching**, Lumen records titles, episode information, app, playback progress, and a small thumbnail per show. It retains the last 20 shows and displays the latest 10. Music, casting, and Live TV aren't recorded.
 
-The helper reads your T3 Code chats through T3 Code's local server with a read-only token and keeps only what it
-needs to show them. It stores, readable only by your user account:
+History stays in Lumen's private app storage on the TV, which other apps can't read. The history file is *`watch-history.json`*, with thumbnails in *`art/`*.
 
-- `~/Library/Application Support/Lumen Agents/`
-  - `t3-token`: its read-only T3 Code session token (30 days, renewed on its own).
-  - `devices.json`: paired TVs (name and the key shared with each).
-  - `id`: a random identifier for this helper, so the TV recognises it.
-  - `admin`: a random secret for the `lumen-agents` command to talk to the helper.
-  - `lumen-agents`: the helper itself.
-- `~/Library/Logs/lumen-agents.log`: the helper's log. It can include TV names, error messages from T3 Code and
-  short, truncated chat text. Redact it before sharing.
+Choose a control in Lumen's **Settings**:
 
-`./mac/install.sh purge` deletes all of it. Revoke the T3 Code session as well ("Lumen TV" in T3 Code's
-connections, or `t3 auth session list` and `t3 auth session revoke`).
+- **Clear watch history** deletes recorded history. This control appears when history exists.
+- **Continue watching** turns recording and progress updates on or off. Turning it off retains existing history until you clear it.
 
-On your network the helper advertises itself over Bonjour with your Mac's name; see [SECURITY.md](SECURITY.md)
-for what else is visible on the network.
+Clearing Lumen's app storage or uninstalling Lumen also removes history.
+
+### Favorites and settings
+
+Favorites, hidden apps, and settings stay in the same private TV storage.
+
+### Agents pairing
+
+After pairing, Lumen stores the pairing key, pairing code, a device ID derived from its key, the Mac's name, the helper ID, its local-network address, and whether pairing completed. This information stays in Lumen's private TV storage.
+
+**Settings > Pair again** deletes the TV's key, code, and device ID and asks the Mac to remove its copy of the key. The saved Mac name, helper ID, and address remain until the next pairing replaces them.
+
+Clearing Lumen's storage in the TV's app settings, or uninstalling Lumen, removes all TV-side pairing data. Look for **Clear data** under **Apps > Lumen** in the TV's system settings; menu nesting can vary by manufacturer.
+
+### Notification-listener access
+
+Android shares active media sessions only with apps that have notification-listener access. Lumen uses this access for **Now playing** and **Continue watching**, and ignores notification contents. Android nevertheless grants broader access: an app with this permission can read notifications.
+
+You can revoke access at any time through the TV's notification-access controls, if available, or the command in [Allow media access](docs/quickstart.md#allow-media-access). **Now playing** and **Continue watching** then stop.
+
+### Accessibility service
+
+The accessibility service intercepts **Home** and draws agent notifications over other apps. It can't read window contents, receives window events only from the Google TV home screen, and passes every key except Home through. Lumen doesn't read or collect screen contents.
+
+## Local-network data
+
+Lumen uses the network only for the optional Agents feature, to communicate with the helper on your own Mac over your local network. With **Agents** and **Agent notifications** off, the default on new installs, Lumen makes no network connections.
+
+When either feature is on, the TV discovers the helper with Bonjour and keeps one request open to it. These connections run only while the TV is awake; the card also requires Lumen to be visible. The TV sends its Android-reported model name during pairing so you can distinguish TVs on the Mac.
+
+Chat titles, project names, model names, and the last message sent by the helper appear on the TV, where anyone in the room can see them. This chat information stays in memory and isn't saved on the TV.
+
+## Mac data
+
+The helper reads chats through T3 Code's local server with a read-only token and retains only what it needs to display them. It stores the following in your account, with the data readable only by you:
+
+| Location | Data |
+| --- | --- |
+| `~/Library/Application Support/Lumen Agents/t3-token` | Read-only T3 Code session token, valid for 30 days and renewed automatically. |
+| `~/Library/Application Support/Lumen Agents/devices.json` | Paired TV names and the key shared with each TV. |
+| `~/Library/Application Support/Lumen Agents/id` | Random helper identifier so the TV recognizes the helper. |
+| `~/Library/Application Support/Lumen Agents/admin` | Random secret for the local helper command. |
+| `~/Library/Application Support/Lumen Agents/lumen-agents` | Installed helper binary. |
+| `~/Library/Logs/lumen-agents.log` | Helper log, which can include TV names, T3 Code error messages, and short, truncated chat text. Redact it before sharing. |
+
+The installer also creates *`~/Library/LaunchAgents/local.lumen.agents.plist`* and the command link *`~/.local/bin/lumen-agents`*.
+
+The helper advertises your Mac's name over Bonjour. See [Information that isn't confidential](SECURITY.md#information-that-isnt-confidential) for other visible network information.
+
+## Remove stored data
+
+- On the TV, clearing Lumen's storage or uninstalling it removes all Lumen data there. Clearing only watch history leaves settings and pairing data intact.
+- On the Mac, *`./mac/install.sh uninstall`* stops and removes the helper but keeps its token, pairings, helper ID, admin secret, and log.
+- On the Mac, *`./mac/install.sh purge`* also deletes the entire Lumen Agents application-support directory and its log.
+- Purging doesn't revoke T3 Code's session record. Revoke **Lumen TV** in T3 Code's connections UI, or list and revoke its session with T3 Code's CLI.
+
+Follow [Remove Lumen](docs/uninstall.md#before-you-begin) for ordered steps and the commands to revoke the session.
+
+## What's next
+
+- [Understand the security design and limitations](SECURITY.md#security-design).
+- [Remove Lumen and revoke its T3 Code session](docs/uninstall.md#before-you-begin).
