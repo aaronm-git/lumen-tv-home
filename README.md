@@ -63,6 +63,10 @@ Watch history stays on your TV. Lumen makes no network connections when Agents a
 
 Read the [contribution prerequisites](CONTRIBUTING.md#before-you-begin), [code conventions](CONTRIBUTING.md#code-conventions), and [bug-reporting instructions](CONTRIBUTING.md#report-a-bug).
 
+## Support the project
+
+Lumen is free. If it's useful to you, you can [buy me a coffee](https://buymeacoffee.com/aaronmolina).
+
 ## License and notices
 
 Lumen is released under the [MIT License](LICENSE), Copyright (c) 2026 Aaron Molina. The model logos in `res/drawable/brand_*.xml` are adapted from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, Copyright (c) 2023 LobeHub). See [third-party notices](THIRD_PARTY_NOTICES.md). You can also read the notices in **Settings > Licenses & notices**.
