@@ -22,6 +22,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -60,6 +61,11 @@ public class HomeActivity extends Activity {
     private static final int MAX_SHOWS = 10;
     /** As wide as the Now playing card above it. */
     private static final int AGENTS_WIDTH = 380;
+    /**
+     * How long something must keep playing before the Now playing card appears. Apps like YouTube stop and end
+     * their session just after Home takes over, so showing it at once flashes the app you left for a split second.
+     */
+    private static final int NOW_PLAYING_DELAY_MS = 1200;
 
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private Prefs prefs;
@@ -165,6 +171,10 @@ public class HomeActivity extends Activity {
         resumed = false;
         unregisterReceiver(clockReceiver);
         nowPlaying.stop();
+        // Hidden while away, so coming back waits to see what's really still playing.
+        root.removeCallbacks(revealNowCard);
+        if (nowCard.hasFocus()) goToStart();
+        nowCard.setVisibility(View.GONE);
         showing = false;
         agents.want(AgentStatus.HOME, false);
     }
@@ -838,15 +848,28 @@ public class HomeActivity extends Activity {
     // ---- Now playing -----------------------------------------------------------------------
 
     private void onNowPlaying(MediaController c, MediaMetadata md, boolean playing) {
+        root.removeCallbacks(revealNowCard);
         if (c == null || !prefs.showNowPlaying) {
             if (nowCard.hasFocus()) goToStart();
             nowCard.setVisibility(View.GONE);
             return;
         }
         nowCard.bind(c, md, playing);
-        nowCard.setVisibility(View.VISIBLE);
-        if (nowCard.hasFocus()) nowPlayingHero();
+        if (nowCard.getVisibility() == View.VISIBLE) {
+            if (nowCard.hasFocus()) nowPlayingHero();
+        } else {
+            root.postDelayed(revealNowCard, NOW_PLAYING_DELAY_MS);
+        }
     }
+
+    /** Fades the card in, sliding a little from the right, once what it shows has lasted (NOW_PLAYING_DELAY_MS). */
+    private final Runnable revealNowCard = () -> {
+        nowCard.setVisibility(View.VISIBLE);
+        nowCard.setAlpha(0f);
+        nowCard.setTranslationX(dp(16));
+        nowCard.animate().alpha(1f).translationX(0).setDuration(350).setInterpolator(new DecelerateInterpolator())
+                .start();
+    };
 
     private void nowPlayingHero() {
         String hint = nowCard.button.isFocused() ? (nowCard.playing ? "Pause" : "Play")
