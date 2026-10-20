@@ -56,6 +56,8 @@ public class HomeActivity extends Activity {
     private static final String LIVE_TV = "com.sony.dtv.tvx";
     private static final int SIDE = 56;
     private static final int MAX_SHOWS = 10;
+    /** As wide as the Now playing card above it. */
+    private static final int AGENTS_WIDTH = 380;
 
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private Prefs prefs;
@@ -81,6 +83,11 @@ public class HomeActivity extends Activity {
     private boolean homePressed;
     private NowPlaying nowPlaying;
     private NowPlayingCard nowCard;
+    private AgentStatus agents;
+    private final AgentStatus.Listener agentsListener = this::onAgents;
+    /** Whether the home screen is in front (agent notifications aren't needed then). */
+    static boolean showing;
+    private AgentsCard agentsCard;
 
     private Sheet sheet;
     private String movingPkg;
@@ -111,10 +118,12 @@ public class HomeActivity extends Activity {
         super.onCreate(state);
         prefs = new Prefs(this, DEFAULT_FAVORITES);
         nowPlaying = new NowPlaying(this, this::onNowPlaying);
+        agents = AgentStatus.get(this);
         history = WatchHistory.get(this);
         history.addListener(historyListener);
         buildLayout();
         setContentView(root);
+        agents.addListener(agentsListener);
 
         IntentFilter pkgs = new IntentFilter();
         pkgs.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -144,6 +153,8 @@ public class HomeActivity extends Activity {
             goToStart();
         }
         if (prefs.showNowPlaying) nowPlaying.start();
+        showing = true;
+        if (prefs.showAgents) agents.want(AgentStatus.HOME, true);
     }
 
     @Override
@@ -152,11 +163,14 @@ public class HomeActivity extends Activity {
         resumed = false;
         unregisterReceiver(clockReceiver);
         nowPlaying.stop();
+        showing = false;
+        agents.want(AgentStatus.HOME, false);
     }
 
     @Override
     protected void onDestroy() {
         unregisterReceiver(packageReceiver);
+        agents.removeListener(agentsListener);
         history.removeListener(historyListener);
         loader.shutdownNow();
         super.onDestroy();
@@ -226,7 +240,7 @@ public class HomeActivity extends Activity {
         content.setClipToPadding(false);
         root.addView(content, match());
 
-        // Clock on the left; Inputs, Settings and Now playing on the right.
+        // Clock on the left; Inputs and Settings on the right, with Now playing and Agents below them.
         FrameLayout top = new FrameLayout(this);
         top.setClipChildren(false);
         LinearLayout header = new LinearLayout(this);
@@ -263,11 +277,36 @@ public class HomeActivity extends Activity {
         nowCard.body.setOnClickListener(v -> openNowPlaying());
         nowCard.button.setOnClickListener(v -> togglePlayback());
         nowCard.onFocused = this::nowPlayingHero;
-        FrameLayout.LayoutParams nowLp = new FrameLayout.LayoutParams(
+
+        agentsCard = new AgentsCard(this);
+        agentsCard.setVisibility(View.GONE);
+        agentsCard.callbacks = new AgentsCard.Callbacks() {
+            @Override
+            public void onFocused(String title, String hint, int color) {
+                setHero(title, hint, color);
+            }
+
+            @Override
+            public void onSelected(AgentStatus.Chat chat) {
+                showChat(chat);
+            }
+        };
+
+        // The right-hand column sits beside the hero text, so it only pushes the rows down when it's taller.
+        LinearLayout side = new LinearLayout(this);
+        side.setOrientation(LinearLayout.VERTICAL);
+        side.setGravity(Gravity.END);
+        side.setClipChildren(false);
+        side.addView(nowCard);
+        LinearLayout.LayoutParams agentsLp = new LinearLayout.LayoutParams(
+                dp(AGENTS_WIDTH), ViewGroup.LayoutParams.WRAP_CONTENT);
+        agentsLp.topMargin = dp(12);
+        side.addView(agentsCard, agentsLp);
+        FrameLayout.LayoutParams sideLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-        nowLp.rightMargin = dp(SIDE);
-        nowLp.topMargin = dp(68);
-        top.addView(nowCard, nowLp);
+        sideLp.rightMargin = dp(SIDE);
+        sideLp.topMargin = dp(68);
+        sideLp.bottomMargin = dp(16);
 
         heroTitle = text(30, 0xFFFFFFFF, "sans-serif-medium");
         heroSub = text(14, 0x80FFFFFF, "sans-serif");
@@ -284,11 +323,20 @@ public class HomeActivity extends Activity {
         page.setClipChildren(false);
         page.setClipToPadding(false);
         page.setPadding(0, dp(36), 0, dp(32));
-        page.addView(top);
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        left.setClipChildren(false);
+        left.addView(top);
         LinearLayout.LayoutParams heroLp = indented(0);
         heroLp.topMargin = dp(28);
-        page.addView(heroTitle, heroLp);
-        page.addView(heroSub, indented(16));
+        left.addView(heroTitle, heroLp);
+        left.addView(heroSub, indented(16));
+        FrameLayout head = new FrameLayout(this);
+        head.setClipChildren(false);
+        head.addView(left, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        head.addView(side, sideLp);
+        page.addView(head);
 
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -708,6 +756,18 @@ public class HomeActivity extends Activity {
                 onNowPlaying(null, null, false);
             }
         });
+        s.add("Agents", agentsSetting(), false, () -> {
+            prefs.showAgents = !prefs.showAgents;
+            prefs.save();
+            agents.want(AgentStatus.HOME, prefs.showAgents);
+            if (prefs.showAgents && agents.last != null) onAgents(agents.last);
+            else showAgentsCard(false);
+        });
+        s.add("Agent notifications", prefs.agentAlerts ? "On  ·  over other apps when a chat finishes or needs you"
+                : "Off", false, () -> {
+            prefs.agentAlerts = !prefs.agentAlerts;
+            prefs.save();
+        });
         if (!history.list().isEmpty()) {
             s.add("Clear watch history", "Removes every show from Continue watching", false, history::clear);
         }
@@ -806,6 +866,50 @@ public class HomeActivity extends Activity {
         else c.getTransportControls().play();
     }
 
+    // ---- Agents ----------------------------------------------------------------------------
+
+    private void onAgents(AgentStatus.Snapshot s) {
+        if (!prefs.showAgents) return;
+        boolean focused = agentsCard.hasFocus();
+        boolean show = prefs.showAgents && agentsCard.bind(s);
+        showAgentsCard(show);
+        // The focused chat became a line you can't select, like "Mac offline".
+        if (focused && show && !agentsCard.hasFocus()) goToStart();
+    }
+
+    private void showAgentsCard(boolean show) {
+        if (!show && agentsCard.hasFocus()) goToStart();
+        agentsCard.setVisibility(show ? View.VISIBLE : View.GONE);
+        // Long hero titles would run under the card.
+        int max = show ? getResources().getDisplayMetrics().widthPixels - dp(2 * SIDE + AGENTS_WIDTH + 24)
+                : Integer.MAX_VALUE;
+        heroTitle.setMaxWidth(max);
+        heroSub.setMaxWidth(max);
+    }
+
+    private String agentsSetting() {
+        if (!prefs.showAgents) return "Off";
+        AgentStatus.Snapshot s = agents.last;
+        if (s != null && s.phase == AgentStatus.PAIRING) return "On  ·  pair with code " + s.code;
+        if (agents.paired() && s != null) return "On  ·  T3 Code chats from " + s.mac;
+        return "On  ·  T3 Code chats from your Mac (Lumen Agents)";
+    }
+
+    /** There's no T3 Code on the TV, so OK just shows what the chat is up to. */
+    private void showChat(AgentStatus.Chat c) {
+        Sheet s = new Sheet(c.title);
+        List<String> about = new ArrayList<>();
+        about.add(AgentsCard.stateName(c.state));
+        if (!c.detail.isEmpty() && !c.detail.equals("Working") && !c.detail.equals("Finished")) about.add(c.detail);
+        if (!c.project.isEmpty()) about.add(c.project);
+        if (!c.model.isEmpty()) about.add(AgentsCard.modelName(c.model));
+        if (c.age >= 60) about.add(AgentsCard.ago(c.age) + ("working".equals(c.state) ? "" : " ago"));
+        s.note(String.join("  ·  ", about), AgentsCard.color(c.state));
+        if (c.text != null) s.note(c.text, 0xCCFFFFFF);
+        s.add("Close", "Reply in T3 Code on your Mac or phone", false, () -> {});
+        s.show();
+    }
+
     // ---- Inputs ----------------------------------------------------------------------------
 
     private void showInputs() {
@@ -881,6 +985,18 @@ public class HomeActivity extends Activity {
                     dp(400), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         }
 
+        /** Text that can't be selected, such as what a chat last said. */
+        void note(String text, int color) {
+            TextView t = text(14, color, "sans-serif");
+            t.setShadowLayer(0, 0, 0, 0);
+            t.setSingleLine(false);
+            t.setMaxLines(8);
+            t.setLineSpacing(0, 1.15f);
+            t.setText(text);
+            t.setPadding(dp(16), dp(4), dp(16), dp(6));
+            list.addView(t);
+        }
+
         void add(String title, String detail, boolean dim, Runnable action) {
             LinearLayout item = new LinearLayout(HomeActivity.this);
             item.setOrientation(LinearLayout.VERTICAL);
@@ -923,7 +1039,7 @@ public class HomeActivity extends Activity {
             root.addView(scrim, match());
             scrim.setAlpha(0f);
             scrim.animate().alpha(1f).setDuration(140).start();
-            if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+            for (int i = 0; i < list.getChildCount(); i++) if (list.getChildAt(i).requestFocus()) break;
         }
 
         void dismiss() {

@@ -5,6 +5,9 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Only for the Agents card: talks to the Lumen Agents helper on your Mac over the home network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Android 11+ hides other apps unless we say which ones we need to see. -->
     <queries>
         <intent>
@@ -23,6 +26,7 @@
         android:banner="@drawable/banner"
         android:allowBackup="false"
         android:supportsRtl="false"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Lumen">
 
         <activity
