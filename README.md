@@ -70,7 +70,9 @@ Read the [contribution prerequisites](CONTRIBUTING.md#before-you-begin), [code c
 
 ## Support the project
 
-Lumen is free. If it's useful to you, you can [buy me a coffee](https://buymeacoffee.com/aaronmolina).
+Lumen is free. If it's useful to you, you can support its development.
+
+<a href="https://www.buymeacoffee.com/aaronmolina"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" width="217" height="60"></a>
 
 ## License and notices
 
