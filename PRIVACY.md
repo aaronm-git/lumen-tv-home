@@ -5,10 +5,17 @@ Lumen has no analytics, tracking, ads or accounts, and sends nothing to its auth
 ## On the TV
 
 - **Watch history.** To build Continue watching, Lumen records what you play: titles, episode, app, progress and
-  a small thumbnail per show (the last 10). It's kept in Lumen's private app storage on the TV, which other apps
-  can't read. Clear it in Settings (**Clear watch history**), stop it by turning **Continue watching** off, or
-  remove it by uninstalling Lumen. Music, casting and Live TV aren't recorded.
+  a small thumbnail per show. It keeps the last 20 shows and shows the latest 10. It's kept in Lumen's private app
+  storage on the TV, which other apps can't read. Clear it in Settings (**Clear watch history**), stop it by turning
+  **Continue watching** off (nothing is recorded or updated while it's off, and what's already there is kept until
+  you clear it), or remove it by clearing Lumen's storage or uninstalling Lumen. Music, casting and Live TV aren't
+  recorded.
 - **Favourites, hidden apps and settings** are kept in the same private storage.
+- **Agents pairing.** Once you pair with a Mac, Lumen keeps its pairing key, the pairing code, a device id made from
+  its key, the Mac's name, the helper's id and its address on your network, and whether pairing finished, in the
+  same private storage. **Pair again** deletes the key, code and device id (and asks the Mac to drop its copy of
+  the key); the Mac's name, id and address stay until the next pairing replaces them. Clearing Lumen's storage
+  (Clear data under Apps › Lumen in the TV's Settings) or uninstalling Lumen removes all of it.
 - **Notification-listener access.** Android only shares media sessions (what's playing) with apps that have
   notification-listener access, so Lumen asks for it. Lumen uses it only for media sessions and ignores the
   contents of notifications, but note that Android grants listeners broader access: an app with it could read

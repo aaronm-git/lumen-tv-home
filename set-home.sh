@@ -29,13 +29,20 @@ if [ "$1" = projectivy ]; then
     # Projectivy may have been disabled while Lumen was home; turn it back on first.
     adb -s "$T" shell pm enable com.spocky.projengmenu >/dev/null
 fi
-CUR=$(adb -s "$T" shell settings get secure enabled_accessibility_services | tr -d '\r')
+# Read the current list first; if the TV doesn't answer, stop rather than overwrite what's there.
+CUR=$(adb -s "$T" shell settings get secure enabled_accessibility_services) || CUR=
+CUR=$(printf '%s\n' "$CUR" | tr -d '\r')
+if [ -z "$CUR" ]; then
+    echo "Couldn't read the TV's accessibility services; nothing was changed." >&2
+    exit 1
+fi
 [ "$CUR" = null ] && CUR=
 NEW=$(printf '%s\n' "$CUR" | tr ':' '\n' | grep -vxF -e "$LUMEN" -e "$LUMEN_LONG" \
     -e "$PROJECTIVY" -e "$PROJECTIVY_LONG" -e "" | paste -sd: - || true)
 [ -n "$ON" ] && NEW=${NEW:+$NEW:}$ON
 if [ -n "$NEW" ]; then
-    adb -s "$T" shell settings put secure enabled_accessibility_services "$NEW"
+    # One single-quoted string for the TV's shell, so a $ in a service name isn't expanded there.
+    adb -s "$T" shell "settings put secure enabled_accessibility_services '$(printf '%s' "$NEW" | sed "s/'/'\\\\''/g")'"
     adb -s "$T" shell settings put secure accessibility_enabled 1
 else
     adb -s "$T" shell settings delete secure enabled_accessibility_services >/dev/null

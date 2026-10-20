@@ -61,6 +61,9 @@ uses an internal, undocumented interface that may change without notice.
   process could in principle take the port.
 - **Loopback slots.** Other users on the same Mac can open connections to the helper on loopback and use up the
   slots reserved for the `lumen-agents` command (they can't authenticate, but they can make the command wait).
+- **Replays after a restart.** The helper keeps each TV's latest request time in memory only, so after the helper
+  restarts, someone who recorded the TV's signed requests from the last 10 minutes could send them again. Those are
+  status requests, whose replies they can't read, and Pair again's request to drop the TV's key.
 - **One key per pairing.** Requests and replies use the same key, not separate keys per direction.
 - **Network debugging.** Leaving ADB network debugging on lets others on the network try to connect to the TV;
   turn it off after setup.

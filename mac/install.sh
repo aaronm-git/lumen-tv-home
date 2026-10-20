@@ -3,23 +3,58 @@
 #   ./mac/install.sh            build, install and (re)start
 #   ./mac/install.sh uninstall  stop it and remove it (pairings, the T3 token and the log are kept)
 #   ./mac/install.sh purge      uninstall, and also delete the token, pairings, admin secret and log
+# With LUMEN_DRY_RUN=1 it only runs its checks and shows what it would do, without changing anything.
 set -eu
 cd "$(dirname "$0")"
+case "$#:${1:-}" in
+    0:|1:uninstall|1:purge) ;;
+    *) echo "usage: $0 [uninstall|purge]" >&2; exit 1 ;;
+esac
+
+# The helper keeps its files in your account's home folder, whatever $HOME says, so only go ahead when they match.
+ACCOUNT=$(dscl -plist . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null \
+    | plutil -extract dsAttrTypeStandard:NFSHomeDirectory.0 raw -o - - 2>/dev/null || true)
+case "$ACCOUNT" in
+    /*) ;;
+    *) echo "Couldn't look up your account's home folder; nothing was changed." >&2; exit 1 ;;
+esac
+if [ "$ACCOUNT" != "${HOME:-}" ]; then
+    echo "\$HOME (${HOME:-unset}) isn't your account's home folder ($ACCOUNT); nothing was changed." >&2
+    exit 1
+fi
+if [ ! -d "$ACCOUNT" ]; then
+    echo "Your home folder ($ACCOUNT) doesn't exist; nothing was changed." >&2
+    exit 1
+fi
+
 APP="$HOME/Library/Application Support/Lumen Agents"
 BIN="$APP/lumen-agents"
 PLIST="$HOME/Library/LaunchAgents/local.lumen.agents.plist"
 LOG="$HOME/Library/Logs/lumen-agents.log"
+LINK="$HOME/.local/bin/lumen-agents"
 DOMAIN="gui/$(id -u)"
 
-case "${1:-}" in
-    ""|uninstall|purge) ;;
-    *) echo "usage: $0 [uninstall|purge]" >&2; exit 1 ;;
-esac
+# Never follow a symlink somewhere else when replacing or deleting.
+for f in "$APP" "$PLIST" "$LOG"; do
+    if [ -L "$f" ]; then
+        echo "$f is a symlink; remove it or put the real thing there first. Nothing was changed." >&2
+        exit 1
+    fi
+done
+if { [ -e "$LINK" ] || [ -L "$LINK" ]; } && [ "$(readlink "$LINK" || true)" != "$BIN" ]; then
+    echo "$LINK isn't a link to Lumen Agents; move it out of the way first. Nothing was changed." >&2
+    exit 1
+fi
 
-launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
 case "${1:-}" in
     uninstall|purge)
-        rm -f "$PLIST" "$BIN" "$HOME/.local/bin/lumen-agents"
+        if [ -n "${LUMEN_DRY_RUN:-}" ]; then
+            echo "Would stop $DOMAIN/local.lumen.agents and remove: $PLIST $BIN $LINK"
+            [ "$1" = purge ] && echo "  and: $APP $LOG"
+            exit 0
+        fi
+        launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
+        rm -f "$PLIST" "$BIN" "$LINK"
         if [ "$1" = purge ]; then
             rm -rf "$APP" "$LOG"
             echo "Removed Lumen Agents with its token, pairings and log."
@@ -32,38 +67,46 @@ case "${1:-}" in
         exit 0 ;;
 esac
 
+# Make the launchd job first and check it, so a bad value can't leave the running helper stopped.
+NEW=$(mktemp "${TMPDIR:-/tmp}/lumen-agents.XXXXXX")
+trap 'rm -f "$NEW" "$BIN.new"' EXIT
+plutil -create xml1 "$NEW"
+plutil -insert Label -string local.lumen.agents "$NEW"
+plutil -insert ProgramArguments -array "$NEW"
+plutil -insert ProgramArguments -string "$BIN" -append "$NEW"
+plutil -insert ProgramArguments -string serve -append "$NEW"
+plutil -insert RunAtLoad -bool YES "$NEW"
+plutil -insert KeepAlive -bool YES "$NEW"
+plutil -insert ThrottleInterval -integer 30 "$NEW"
+plutil -insert Nice -integer 5 "$NEW"
+plutil -insert LowPriorityIO -bool YES "$NEW"
+plutil -insert Umask -integer 63 "$NEW"
+plutil -insert StandardErrorPath -string "$LOG" "$NEW"
+# launchd doesn't see your shell's variables, so a custom T3 Code location goes into the job.
+if [ -n "${T3CODE_HOME:-}" ]; then
+    plutil -insert EnvironmentVariables -dictionary "$NEW"
+    plutil -insert EnvironmentVariables.T3CODE_HOME -string "$T3CODE_HOME" "$NEW"
+fi
+plutil -lint -s "$NEW"
+if [ -n "${LUMEN_DRY_RUN:-}" ]; then
+    echo "Would build $BIN and install this as $PLIST:"
+    cat "$NEW"
+    exit 0
+fi
+
 mkdir -p "$APP" "$HOME/Library/LaunchAgents" "$HOME/.local/bin" "$HOME/Library/Logs"
 chmod 700 "$APP"
 # Token, keys and log are for your eyes only.
 find "$APP" -maxdepth 1 -type f ! -name lumen-agents -exec chmod 600 {} +
 touch "$LOG"
 chmod 600 "$LOG"
-swiftc -O -swift-version 5 -o "$BIN" LumenAgents.swift
-ln -sf "$BIN" "$HOME/.local/bin/lumen-agents"
+swiftc -O -swift-version 5 -o "$BIN.new" LumenAgents.swift
 
-# launchd doesn't see your shell's variables, so a custom T3 Code location goes into the job.
-ENVVARS=
-if [ -n "${T3CODE_HOME:-}" ]; then
-    ENVVARS="<key>EnvironmentVariables</key><dict><key>T3CODE_HOME</key><string>$T3CODE_HOME</string></dict>"
-fi
-cat > "$PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>local.lumen.agents</string>
-    <key>ProgramArguments</key><array><string>$BIN</string><string>serve</string></array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>ThrottleInterval</key><integer>30</integer>
-    <key>Nice</key><integer>5</integer>
-    <key>LowPriorityIO</key><true/>
-    <key>Umask</key><integer>63</integer>
-    <key>StandardErrorPath</key><string>$LOG</string>
-    $ENVVARS
-</dict>
-</plist>
-PLIST
+launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
+mv -f "$BIN.new" "$BIN"
+ln -sf "$BIN" "$LINK"
+chmod 644 "$NEW"
+mv -f "$NEW" "$PLIST"
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "Lumen Agents is running (log: ~/Library/Logs/lumen-agents.log)."
 echo "Pair the TV from Lumen's home screen, then run: lumen-agents pair <code>"
