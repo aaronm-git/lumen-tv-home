@@ -27,10 +27,10 @@ uses an internal, undocumented interface that may change without notice.
   "pending"; it then checks the TV's latest signed request against the code. A device in between sees the public
   keys but not the code, so it shouldn't be able to derive the key or guess the code in practice.
 - **Requests and replies.** After pairing, each request (method, path, query and time) is signed with
-  HMAC-SHA256. Times must be recent and only go up, so replayed requests are rejected. Replies are encrypted and
-  authenticated with AES-GCM under the same key and bound to the request's time. The TV ignores anything that
-  isn't sealed with its key. Keys are tagged with the pairing scheme; keys from an older scheme are dropped on both
-  sides.
+  HMAC-SHA256. Times must be recent and only go up, so replayed requests are rejected within one helper process
+  lifetime (see "Replays after a restart" below). Replies are encrypted and authenticated with AES-GCM under the
+  same key and bound to the request's time. The TV ignores anything that isn't sealed with its key. Keys are
+  tagged with the pairing scheme; keys from an older scheme are dropped on both sides.
 - **Pair again / unpair.** Pair again on the TV forgets its key and asks the Mac, with a request signed by that key,
   to drop it too. `lumen-agents unpair` removes keys on the Mac.
 - **T3 Code token.** The helper uses its own read-only token (`orchestration:read`, 30 days, renewed on its own),

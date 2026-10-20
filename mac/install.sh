@@ -18,6 +18,8 @@ case "$ACCOUNT" in
     /*) ;;
     *) echo "Couldn't look up your account's home folder; nothing was changed." >&2; exit 1 ;;
 esac
+# Trailing slashes don't make it a different folder (a lone / stays as it is).
+while case "${HOME:-}" in ?*/) true ;; *) false ;; esac; do HOME=${HOME%/}; done
 if [ "$ACCOUNT" != "${HOME:-}" ]; then
     echo "\$HOME (${HOME:-unset}) isn't your account's home folder ($ACCOUNT); nothing was changed." >&2
     exit 1
@@ -68,8 +70,9 @@ case "${1:-}" in
 esac
 
 # Make the launchd job first and check it, so a bad value can't leave the running helper stopped.
+STAGE=
 NEW=$(mktemp "${TMPDIR:-/tmp}/lumen-agents.XXXXXX")
-trap 'rm -f "$NEW" "$BIN.new"' EXIT
+trap 'rm -f "$NEW"; [ -z "$STAGE" ] || rm -rf "$STAGE"' EXIT
 plutil -create xml1 "$NEW"
 plutil -insert Label -string local.lumen.agents "$NEW"
 plutil -insert ProgramArguments -array "$NEW"
@@ -100,13 +103,33 @@ chmod 700 "$APP"
 find "$APP" -maxdepth 1 -type f ! -name lumen-agents -exec chmod 600 {} +
 touch "$LOG"
 chmod 600 "$LOG"
-swiftc -O -swift-version 5 -o "$BIN.new" LumenAgents.swift
+# Build into a folder of this run's own, next to the installed copy.
+STAGE=$(mktemp -d "$APP/.install.XXXXXX")
+swiftc -O -swift-version 5 -o "$STAGE/lumen-agents" LumenAgents.swift
 
+# Keep the previous version until the new one is running, so a failure can put it back.
+[ ! -e "$BIN" ] || cp -p "$BIN" "$STAGE/previous"
+[ ! -e "$PLIST" ] || cp -p "$PLIST" "$STAGE/previous.plist"
 launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true
-mv -f "$BIN.new" "$BIN"
-ln -sf "$BIN" "$LINK"
-chmod 644 "$NEW"
-mv -f "$NEW" "$PLIST"
-launchctl bootstrap "$DOMAIN" "$PLIST"
+if ! { mv -f "$STAGE/lumen-agents" "$BIN" && ln -sf "$BIN" "$LINK" && chmod 644 "$NEW" \
+        && mv -f "$NEW" "$PLIST" && launchctl bootstrap "$DOMAIN" "$PLIST"; }; then
+    if [ -e "$STAGE/previous.plist" ]; then
+        if { [ ! -e "$STAGE/previous" ] || mv -f "$STAGE/previous" "$BIN"; } \
+                && mv -f "$STAGE/previous.plist" "$PLIST" && launchctl bootstrap "$DOMAIN" "$PLIST"; then
+            echo "Couldn't start the new Lumen Agents; the previous version is running again." >&2
+        else
+            echo "Couldn't start the new Lumen Agents or put the previous one back; it isn't running." >&2
+            if [ -e "$STAGE/previous" ] || [ -e "$STAGE/previous.plist" ]; then
+                echo "The previous version's files are in $STAGE." >&2
+                STAGE=
+            fi
+        fi
+    else
+        if [ -e "$STAGE/previous" ]; then mv -f "$STAGE/previous" "$BIN" || true; else rm -f "$BIN" "$LINK"; fi
+        rm -f "$PLIST"
+        echo "Couldn't start Lumen Agents; it isn't installed." >&2
+    fi
+    exit 1
+fi
 echo "Lumen Agents is running (log: ~/Library/Logs/lumen-agents.log)."
 echo "Pair the TV from Lumen's home screen, then run: lumen-agents pair <code>"

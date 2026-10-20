@@ -26,8 +26,6 @@ adb connect "$T" >/dev/null
 if [ "$1" = projectivy ]; then
     adb -s "$T" shell pm path com.spocky.projengmenu >/dev/null 2>&1 \
         || { echo "Projectivy isn't installed on the TV; try: $0 stock $T" >&2; exit 1; }
-    # Projectivy may have been disabled while Lumen was home; turn it back on first.
-    adb -s "$T" shell pm enable com.spocky.projengmenu >/dev/null
 fi
 # Read the current list first; if the TV doesn't answer, stop rather than overwrite what's there.
 CUR=$(adb -s "$T" shell settings get secure enabled_accessibility_services) || CUR=
@@ -37,6 +35,8 @@ if [ -z "$CUR" ]; then
     exit 1
 fi
 [ "$CUR" = null ] && CUR=
+# Projectivy may have been disabled while Lumen was home; turn it back on.
+[ "$1" != projectivy ] || adb -s "$T" shell pm enable com.spocky.projengmenu >/dev/null
 NEW=$(printf '%s\n' "$CUR" | tr ':' '\n' | grep -vxF -e "$LUMEN" -e "$LUMEN_LONG" \
     -e "$PROJECTIVY" -e "$PROJECTIVY_LONG" -e "" | paste -sd: - || true)
 [ -n "$ON" ] && NEW=${NEW:+$NEW:}$ON
