@@ -476,13 +476,16 @@ public class HomeActivity extends Activity {
         return byPkg;
     }
 
-    /** Recent shows whose app is still installed. */
+    /**
+     * Recent shows whose app is still installed, leaving out ones you've finished. Playing the next
+     * episode of a series replaces its entry, so it comes back then.
+     */
     private List<WatchHistory.Show> visibleShows() {
         List<WatchHistory.Show> out = new ArrayList<>();
         if (!prefs.showContinue) return out;
         Map<String, AppEntry> byPkg = appsByPkg();
         for (WatchHistory.Show sh : history.list()) {
-            if (byPkg.containsKey(sh.pkg)) out.add(sh);
+            if (byPkg.containsKey(sh.pkg) && !sh.finished()) out.add(sh);
             if (out.size() == MAX_SHOWS) break;
         }
         return out;

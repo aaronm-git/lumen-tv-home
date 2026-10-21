@@ -47,6 +47,16 @@ final class WatchHistory {
         float progress() {
             return duration > 0 && position >= 0 ? Math.min(1f, (float) position / duration) : -1;
         }
+
+        /**
+         * Watched to the end, or close enough: the last 5%, or the last 3 minutes of anything 20 minutes
+         * or longer (usually the credits).
+         */
+        boolean finished() {
+            if (duration <= 0 || position < 0) return false;
+            long left = duration - position;
+            return left <= duration / 20 || (duration >= 20 * 60_000 && left <= 3 * 60_000);
+        }
     }
 
     private static final int MAX = 20;
