@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 /**
  * Lumen: a clock, what's playing, the shows you were watching, your favourites and everything else,
@@ -759,17 +760,19 @@ public class HomeActivity extends Activity {
 
     private void showSettings() {
         Sheet s = new Sheet("Settings");
-        s.add(grid ? "Rows" : "Rows  ✓", "Favorites on top, every other app below", false, () -> setLayout("rows"));
-        s.add(grid ? "Grid  ✓" : "Grid", "Every app in one grid, like Apple TV", false, () -> setLayout("grid"));
-        s.add("Continue watching", !prefs.showContinue ? "Off"
+        s.choice(() -> grid ? "Rows" : "Rows  ✓", () -> "Favorites on top, every other app below",
+                () -> setLayout("rows"));
+        s.choice(() -> grid ? "Grid  ✓" : "Grid", () -> "Every app in one grid, like Apple TV",
+                () -> setLayout("grid"));
+        s.choice(() -> "Continue watching", () -> !prefs.showContinue ? "Off"
                 : nowPlaying.allowed() ? "On  ·  shows and movies you've played" : "On  ·  waiting for permission",
-                false, () -> {
+                () -> {
             prefs.showContinue = !prefs.showContinue;
             prefs.save();
             render(null);
         });
-        s.add("Now playing", !prefs.showNowPlaying ? "Off"
-                : nowPlaying.allowed() ? "On  ·  what's playing or paused" : "On  ·  waiting for permission", false, () -> {
+        s.choice(() -> "Now playing", () -> !prefs.showNowPlaying ? "Off"
+                : nowPlaying.allowed() ? "On  ·  what's playing or paused" : "On  ·  waiting for permission", () -> {
             prefs.showNowPlaying = !prefs.showNowPlaying;
             prefs.save();
             if (prefs.showNowPlaying) {
@@ -779,21 +782,21 @@ public class HomeActivity extends Activity {
                 onNowPlaying(null, null, false);
             }
         });
-        s.add("Agents", agentsSetting(), false, () -> {
+        s.choice(() -> "Agents", this::agentsSetting, () -> {
             prefs.showAgents = !prefs.showAgents;
             prefs.save();
             agents.want(AgentStatus.HOME, prefs.showAgents);
             if (prefs.showAgents && agents.last != null) onAgents(agents.last);
             else showAgentsCard(false);
         });
-        s.add("Agent notifications", prefs.agentAlerts
-                ? "On  ·  a chat's title over other apps when it finishes or needs you" : "Off", false, () -> {
+        s.choice(() -> "Agent notifications", () -> prefs.agentAlerts
+                ? "On  ·  a chat's title over other apps when it finishes or needs you" : "Off", () -> {
             prefs.agentAlerts = !prefs.agentAlerts;
             prefs.save();
         });
-        if (prefs.showAgents) {
-            s.add("Pair again", "Forget the key and show a new code to type on the Mac", false, agents::pairAgain);
-        }
+        View pairAgain = s.add("Pair again", "Forget the key and show a new code to type on the Mac",
+                false, agents::pairAgain);
+        s.update(() -> pairAgain.setVisibility(prefs.showAgents ? View.VISIBLE : View.GONE));
         if (!history.list().isEmpty()) {
             s.add("Clear watch history", "Removes every show from Continue watching", false, history::clear);
         }
@@ -819,7 +822,8 @@ public class HomeActivity extends Activity {
         if (layout.equals(prefs.layout)) return;
         prefs.layout = layout;
         prefs.save();
-        recreate();
+        grid = "grid".equals(layout);
+        render(null);
     }
 
     private void showHidden() {
@@ -1030,6 +1034,7 @@ public class HomeActivity extends Activity {
         private final LinearLayout list = new LinearLayout(HomeActivity.this);
         private final ScrollView scroll = new ScrollView(HomeActivity.this);
         private final View restoreFocus = getCurrentFocus();
+        private final List<Runnable> updates = new ArrayList<>();
 
         Sheet(String title) {
             scrim.setBackgroundColor(0xB3000000);
@@ -1061,7 +1066,28 @@ public class HomeActivity extends Activity {
             list.addView(t);
         }
 
-        void add(String title, String detail, boolean dim, Runnable action) {
+        /** Settings stay focused while their labels and any dependent choices update in place. */
+        void choice(Supplier<String> title, Supplier<String> detail, Runnable action) {
+            LinearLayout item = add(title.get(), detail.get(), false, false, () -> {
+                action.run();
+                for (Runnable update : updates) update.run();
+            });
+            update(() -> {
+                ((TextView) item.getChildAt(0)).setText(title.get());
+                ((TextView) item.getChildAt(1)).setText(detail.get());
+            });
+        }
+
+        void update(Runnable update) {
+            updates.add(update);
+            update.run();
+        }
+
+        LinearLayout add(String title, String detail, boolean dim, Runnable action) {
+            return add(title, detail, dim, true, action);
+        }
+
+        private LinearLayout add(String title, String detail, boolean dim, boolean close, Runnable action) {
             LinearLayout item = new LinearLayout(HomeActivity.this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setFocusable(true);
@@ -1086,13 +1112,14 @@ public class HomeActivity extends Activity {
                 item.addView(b);
             }
             item.setOnClickListener(v -> {
-                dismiss();
+                if (close) dismiss();
                 action.run();
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = dp(6);
             list.addView(item, lp);
+            return item;
         }
 
         /** A heading and a long text, such as a license. Focusable, so the remote scrolls through them. */
