@@ -268,11 +268,13 @@ public class HomeActivity extends Activity {
         header.setOrientation(LinearLayout.VERTICAL);
         greeting = text(17, 0xA6FFFFFF, "sans-serif");
         clock = text(64, 0xFFFFFFFF, "sans-serif-light");
+        clock.setEllipsize(null);
         clock.setIncludeFontPadding(false);
         clock.setLetterSpacing(-0.02f);
         date = text(17, 0xB3FFFFFF, "sans-serif");
         header.addView(greeting);
-        header.addView(clock);
+        header.addView(clock, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         header.addView(date);
         FrameLayout.LayoutParams headerLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
