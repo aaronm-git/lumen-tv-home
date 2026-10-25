@@ -1,1 +1,3 @@
 When making updates to `master`, build and install the updated app on the connected TV. Identify the target device at runtime; do not commit personal device details or network addresses.
+
+Prefer `./build.sh DEVICE_ADDRESS` for updates; it restores and verifies Home handling if Lumen's service was enabled before installation. Before a manual install or instrumentation run, record whether that service is enabled. If it was enabled, run `./set-home.sh lumen DEVICE_ADDRESS` afterward. Verify that Home opens Lumen from another app; launching Lumen directly or taking a screenshot doesn't verify Home handling. Leave remapping off if the user had disabled it.

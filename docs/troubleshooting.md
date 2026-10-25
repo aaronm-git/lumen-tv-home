@@ -63,7 +63,7 @@ Turn off network debugging when you finish troubleshooting.
 
 ## Home opens another launcher
 
-**Cause:** Lumen's accessibility service isn't enabled, another launcher intercepts Home, or the TV doesn't use the assumed Google TV launcher.
+**Cause:** Lumen's accessibility service isn't enabled or has stopped, another launcher intercepts Home, or the TV doesn't use the assumed Google TV launcher. Installing an update or running instrumentation tests can stop Lumen's process and leave Android's Home service disconnected even while it remains in the enabled list.
 
 1. In the source directory, enable Lumen's service:
 
@@ -71,7 +71,9 @@ Turn off network debugging when you finish troubleshooting.
    ./set-home.sh lumen DEVICE_ADDRESS
    ```
 
-   This disables Projectivy's accessibility service, preserves unrelated services, and sends **Home**. It doesn't disable other launchers' services.
+   This restarts Lumen and reconnects its service, disables Projectivy's accessibility service, preserves unrelated services, and verifies that **Home** opens Lumen from TV settings. It doesn't disable other launchers' services. The command reports a failure if the service doesn't bind or Home still opens another app.
+
+   When updating an existing installation, `./build.sh DEVICE_ADDRESS` also reconnects and verifies Home if Lumen's service was enabled before the install. It leaves Home remapping off if you had turned it off. After running instrumentation tests, repeat the Home setup command above; opening Lumen directly doesn't verify the Home button.
 
 2. On the remote, press **Home** to verify that Lumen opens.
 3. If another launcher still intercepts Home, review its Home-button configuration in the TV's accessibility settings.

@@ -47,6 +47,13 @@ echo "Built lumen.apk ($VERSION_NAME)"
 
 if [ $# -gt 0 ]; then
     adb connect "$1" >/dev/null
+    SERVICES=$(adb -s "$1" shell settings get secure enabled_accessibility_services)
+    SERVICES=$(printf '%s\n' "$SERVICES" | tr -d '\r')
+    [ -n "$SERVICES" ] || { echo "Couldn't read Home setup; installation stopped." >&2; exit 1; }
     adb -s "$1" install -r lumen.apk
+    if printf '%s\n' "$SERVICES" | tr ':' '\n' | grep -qxF \
+            -e 'local.tvhome/.HomeKeyService' -e 'local.tvhome/local.tvhome.HomeKeyService'; then
+        ./set-home.sh lumen "$1"
+    fi
     echo "Installed. First time? Run ./build.sh grant $1 for Now playing and Continue watching."
 fi
