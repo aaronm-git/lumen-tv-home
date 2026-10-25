@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/** Test stand-in (a class here, an interface on Android). beforeApply lets a test pause a write. */
 public class SharedPreferences {
     public static volatile Consumer<Map<String, Object>> beforeApply;
     private final Map<String, Object> values = new HashMap<>();

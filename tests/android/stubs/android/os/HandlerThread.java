@@ -1,6 +1,5 @@
 package android.os;
 
-/** Test stand-in. */
 public class HandlerThread extends Thread {
     private Looper looper;
 

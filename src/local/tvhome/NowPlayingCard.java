@@ -25,7 +25,6 @@ import android.widget.TextView;
 
 import java.util.Locale;
 
-/** Artwork, title and app of whatever is playing, plus a play/pause button. */
 final class NowPlayingCard extends LinearLayout {
     final LinearLayout body;
     final PlayButton button;
@@ -37,7 +36,7 @@ final class NowPlayingCard extends LinearLayout {
     String appName = "";
     int accent = Ui.SLATE;
     boolean playing;
-    /** Called when the card or its button gains focus. */
+
     Runnable onFocused;
     private MediaMetadata shownMetadata;
 
@@ -107,11 +106,11 @@ final class NowPlayingCard extends LinearLayout {
             appName = pm.getApplicationLabel(ai).toString();
             icon = pm.getApplicationIcon(ai);
         } catch (PackageManager.NameNotFoundException ignored) {
-            // Keep the package name as the label.
+
         }
         label.setText((isPlaying ? "NOW PLAYING" : "PAUSED") + "  ·  " + appName.toUpperCase(Locale.ROOT));
 
-        if (md == shownMetadata) return;  // Only the play state changed.
+        if (md == shownMetadata) return;
         shownMetadata = md;
         titleText = NowPlaying.title(md);
         title.setText(titleText);
@@ -135,7 +134,6 @@ final class NowPlayingCard extends LinearLayout {
         return t;
     }
 
-    /** A round button that draws ▶ or ❚❚ itself, so it needs no image files. */
     static final class PlayButton extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path triangle = new Path();

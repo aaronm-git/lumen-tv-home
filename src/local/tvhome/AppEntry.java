@@ -13,7 +13,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** One launchable TV app, with its artwork and glow colour worked out ahead of time. */
 final class AppEntry {
     final String pkg;
     final ComponentName component;
@@ -39,7 +38,6 @@ final class AppEntry {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
     }
 
-    /** Every TV app except this one, sorted by name. Slow (loads artwork), so call it off the main thread. */
     static List<AppEntry> loadAll(Context c) {
         PackageManager pm = c.getPackageManager();
         Intent query = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);

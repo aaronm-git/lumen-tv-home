@@ -8,12 +8,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** An app's banner tile. */
 final class TileView extends Tile {
     static final int FAVORITE = 1, APP = 2;
 
     final AppEntry app;
-    /** Which row the tile sits in. */
+
     final int section;
     private final TextView moveBadge;
 
@@ -28,7 +27,7 @@ final class TileView extends Tile {
             banner.setImageDrawable(app.banner);
             addView(banner, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         } else {
-            // No banner: the app's icon and name on a card tinted with its colour.
+
             setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{
                     Ui.mix(app.accent, 0xFF000000, 0.55f), Ui.mix(app.accent, 0xFF000000, 0.8f)}));
             LinearLayout col = new LinearLayout(c);

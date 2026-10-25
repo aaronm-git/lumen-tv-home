@@ -1,9 +1,4 @@
 #!/bin/sh
-# Builds Lumen Agents and runs it in the background on this Mac (a launchd agent that starts at login).
-#   ./mac/install.sh            build, install and (re)start
-#   ./mac/install.sh uninstall  stop it and remove it (pairings, the T3 token and the log are kept)
-#   ./mac/install.sh purge      uninstall, and also delete the token, pairings, admin secret and log
-# With LUMEN_DRY_RUN=1 it only runs its checks and shows what it would do, without changing anything.
 set -eu
 cd "$(dirname "$0")"
 case "$#:${1:-}" in
@@ -11,14 +6,12 @@ case "$#:${1:-}" in
     *) echo "usage: $0 [uninstall|purge]" >&2; exit 1 ;;
 esac
 
-# The helper keeps its files in your account's home folder, whatever $HOME says, so only go ahead when they match.
 ACCOUNT=$(dscl -plist . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null \
     | plutil -extract dsAttrTypeStandard:NFSHomeDirectory.0 raw -o - - 2>/dev/null || true)
 case "$ACCOUNT" in
     /*) ;;
     *) echo "Couldn't look up your account's home folder; nothing was changed." >&2; exit 1 ;;
 esac
-# Trailing slashes don't make it a different folder (a lone / stays as it is).
 while case "${HOME:-}" in ?*/) true ;; *) false ;; esac; do HOME=${HOME%/}; done
 if [ "$ACCOUNT" != "${HOME:-}" ]; then
     echo "\$HOME (${HOME:-unset}) isn't your account's home folder ($ACCOUNT); nothing was changed." >&2
@@ -36,7 +29,6 @@ LOG="$HOME/Library/Logs/lumen-agents.log"
 LINK="$HOME/.local/bin/lumen-agents"
 DOMAIN="gui/$(id -u)"
 
-# Never follow a symlink somewhere else when replacing or deleting.
 for f in "$APP" "$PLIST" "$LOG"; do
     if [ -L "$f" ]; then
         echo "$f is a symlink; remove it or put the real thing there first. Nothing was changed." >&2
@@ -69,7 +61,6 @@ case "${1:-}" in
         exit 0 ;;
 esac
 
-# Make the launchd job first and check it, so a bad value can't leave the running helper stopped.
 STAGE=
 NEW=$(mktemp "${TMPDIR:-/tmp}/lumen-agents.XXXXXX")
 trap 'rm -f "$NEW"; [ -z "$STAGE" ] || rm -rf "$STAGE"' EXIT
@@ -85,7 +76,6 @@ plutil -insert Nice -integer 5 "$NEW"
 plutil -insert LowPriorityIO -bool YES "$NEW"
 plutil -insert Umask -integer 63 "$NEW"
 plutil -insert StandardErrorPath -string "$LOG" "$NEW"
-# launchd doesn't see your shell's variables, so a custom T3 Code location goes into the job.
 if [ -n "${T3CODE_HOME:-}" ]; then
     plutil -insert EnvironmentVariables -dictionary "$NEW"
     plutil -insert EnvironmentVariables.T3CODE_HOME -string "$T3CODE_HOME" "$NEW"
@@ -99,15 +89,12 @@ fi
 
 mkdir -p "$APP" "$HOME/Library/LaunchAgents" "$HOME/.local/bin" "$HOME/Library/Logs"
 chmod 700 "$APP"
-# Token, keys and log are for your eyes only.
 find "$APP" -maxdepth 1 -type f ! -name lumen-agents -exec chmod 600 {} +
 touch "$LOG"
 chmod 600 "$LOG"
-# Build into a folder of this run's own, next to the installed copy.
 STAGE=$(mktemp -d "$APP/.install.XXXXXX")
 swiftc -O -swift-version 5 -o "$STAGE/lumen-agents" LumenAgents.swift
 
-# Keep the previous version until the new one is running, so a failure can put it back.
 [ ! -e "$BIN" ] || cp -p "$BIN" "$STAGE/previous"
 [ ! -e "$PLIST" ] || cp -p "$PLIST" "$STAGE/previous.plist"
 launchctl bootout "$DOMAIN/local.lumen.agents" 2>/dev/null || true

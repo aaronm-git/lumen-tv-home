@@ -1,6 +1,5 @@
 package android.os;
 
-/** Test stand-in. */
 public class Handler {
     private final Looper looper;
 

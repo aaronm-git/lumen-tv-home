@@ -1,6 +1,5 @@
 package android.net.nsd;
 
-/** Test stand-in; the tests give the Mac's address directly, so nothing is ever found. */
 public class NsdManager {
     public static final int PROTOCOL_DNS_SD = 1;
 

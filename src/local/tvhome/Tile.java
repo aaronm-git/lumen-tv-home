@@ -10,7 +10,6 @@ import android.view.ViewOutlineProvider;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 
-/** A rounded card that lifts, grows and glows in its own colour when focused. */
 class Tile extends FrameLayout {
     private static final DecelerateInterpolator EASE = new DecelerateInterpolator(2f);
 

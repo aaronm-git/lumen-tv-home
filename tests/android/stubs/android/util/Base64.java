@@ -1,6 +1,5 @@
 package android.util;
 
-/** Test stand-in. */
 public final class Base64 {
     public static final int NO_WRAP = 2;
 

@@ -14,14 +14,9 @@ import android.text.TextUtils;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Follows the media sessions apps publish (the same ones behind play/pause on the remote) and reports
- * the one that is playing, or else the most recent paused one. The home screen runs one while it's
- * on screen (for the Now playing card); MediaAccess runs another all the time (for Continue watching).
- */
 final class NowPlaying {
     interface Listener {
-        /** controller is null when nothing is playing or paused. */
+
         void onNowPlaying(MediaController controller, MediaMetadata metadata, boolean playing);
     }
 
@@ -75,7 +70,6 @@ final class NowPlaying {
         pick();
     }
 
-    /** Sessions come most-recent first, so the first playing one wins, then the first paused one. */
     private void pick() {
         Watched best = null;
         for (Watched w : watched) {
@@ -90,7 +84,6 @@ final class NowPlaying {
         else listener.onNowPlaying(best.controller, best.metadata, isPlaying(best.state));
     }
 
-    /** Caches each session's details so routine position updates don't cost anything. */
     private final class Watched extends MediaController.Callback {
         final MediaController controller;
         MediaMetadata metadata;
@@ -141,7 +134,6 @@ final class NowPlaying {
                 MediaMetadata.METADATA_KEY_ALBUM);
     }
 
-    /** The live session for this app that's showing this title, if the app still has it open. */
     static MediaController find(Context c, String pkg, String title) {
         try {
             MediaSessionManager msm = c.getSystemService(MediaSessionManager.class);
@@ -149,12 +141,11 @@ final class NowPlaying {
                 if (mc.getPackageName().equals(pkg) && title.equals(title(mc.getMetadata()))) return mc;
             }
         } catch (SecurityException e) {
-            // No access: the caller falls back to opening the app.
+
         }
         return null;
     }
 
-    /** The session's artwork, shrunk to at most maxPx so a large poster doesn't sit in memory. */
     static Bitmap art(MediaMetadata md, int maxPx) {
         if (md == null) return null;
         for (String key : new String[]{MediaMetadata.METADATA_KEY_DISPLAY_ICON,

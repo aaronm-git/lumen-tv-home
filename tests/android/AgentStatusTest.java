@@ -26,11 +26,6 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/**
- * Offline tests for AgentStatus's worker on the JVM; run with tests/android/run.sh. Android's classes are small
- * stand-ins (stubs/), and the Mac is a fake helper in this process on 127.0.0.1 that seals replies like the real
- * one. Nothing touches a TV, an emulator, ADB or the real helper.
- */
 public final class AgentStatusTest {
     interface Script {
         void handle(HttpExchange x, String target, String time) throws Exception;
@@ -45,8 +40,6 @@ public final class AgentStatusTest {
         System.out.println((ok ? "  ok    " : "  FAIL  ") + what);
         if (!ok) failed++;
     }
-
-    // ---- The fake Mac ---------------------------------------------------------------------
 
     static String chat(String title) {
         return "{\"id\":\"" + title + "\",\"title\":\"" + title + "\",\"state\":\"done\",\"detail\":\"Finished\"}";
@@ -85,8 +78,6 @@ public final class AgentStatusTest {
         } catch (InterruptedException ignored) {
         }
     }
-
-    // ---- The TV side ----------------------------------------------------------------------
 
     static final Handler main = new Handler(Looper.getMainLooper());
 
@@ -129,7 +120,6 @@ public final class AgentStatusTest {
                 .putBoolean("paired", true).apply();
     }
 
-    /** Pauses the TV's thread when it saves a reply naming this Mac, between reading the reply and showing it. */
     static void pauseAt(String macName, CountDownLatch paused, CountDownLatch resume) {
         SharedPreferences.beforeApply = put -> {
             if (!macName.equals(put.get("mac"))) return;
@@ -151,7 +141,7 @@ public final class AgentStatusTest {
                 String time = x.getRequestHeaders().getFirst("X-Lumen-Time");
                 mac.handle(x, x.getRequestURI().toString(), time == null ? "" : time);
             } catch (Exception ignored) {
-                // The TV let go of the request.
+
             } finally {
                 x.close();
             }
@@ -187,7 +177,7 @@ public final class AgentStatusTest {
         CountDownLatch paused = new CountDownLatch(1), resume = new CountDownLatch(1);
         pauseAt("Stale Mac", paused, resume);
         CountDownLatch gate2 = new CountDownLatch(1);
-        // Its waiting request gets an answer, and the TV is between reading it and showing it...
+
         gate1.countDown();
         check(paused.await(10, TimeUnit.SECONDS), "(the old request has its reply)");
         Script next = (x, target, time) -> {
@@ -199,7 +189,7 @@ public final class AgentStatusTest {
             }
         };
         mac = next;
-        // ...when it stops listening and starts again.
+
         onMain(() -> {
             agents.want(AgentStatus.HOME, false);
             synchronized (AgentStatusTest.class) {

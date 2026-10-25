@@ -1,7 +1,4 @@
 #!/bin/sh
-# Offline tests for Lumen Agents (see AgentsTests.swift): builds the helper, a fake T3 Code server and the tests in
-# a temporary folder and runs them there. Doesn't touch the installed helper, its files, T3 Code or any TV; the
-# test helper runs on a random port with its own folder and isn't advertised over Bonjour.
 set -eu
 cd "$(dirname "$0")"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/lumen-agents-tests.XXXXXX")

@@ -1,22 +1,3 @@
-// Lumen Agents: a small Mac helper that follows T3 Code's chats and shares their status with Lumen on the TV.
-//
-// It reads T3 Code with a read-only token (`t3 auth session issue --scope orchestration:read`, only when you run
-// `lumen-agents authorize`; once T3 Code rejects it, it stays off until you do that again), loads the thread
-// list over HTTP, then follows the server's shell stream so it only wakes when a chat changes. The TV finds it over
-// Bonjour (_lumen-agents._tcp) and must be paired once: the TV shows a code that never goes over the network, and
-// typing it here completes the key. Requests are signed and replies encrypted with that key, so other devices on the
-// network shouldn't be able to read or fake them (see SECURITY.md for what this does and doesn't cover).
-//
-// Lumen Agents is an unofficial integration with T3 Code and is not affiliated with or endorsed by T3 Tools, Inc.
-// It uses an internal, undocumented interface that may change without notice. Tested with T3 Code (Beta) 0.1.0,
-// x-t3-orchestration-protocol: 2.
-//
-//   lumen-agents serve          run the helper (launchd does this)
-//   lumen-agents authorize      let it read T3 Code: first time, and again after T3 Code rejects its token
-//   lumen-agents pair <code>    approve the TV showing that code (K7QM-9XRT-4HNP-2WVD; any case, dashes optional)
-//   lumen-agents devices        list paired TVs
-//   lumen-agents unpair all     forget every TV (or pass a name)
-//   lumen-agents status         print what the TV would see
 import CryptoKit
 import Foundation
 import Network
@@ -24,8 +5,7 @@ import Network
 let env = ProcessInfo.processInfo.environment
 let fm = FileManager.default
 let home = fm.homeDirectoryForCurrentUser
-// LUMEN_AGENTS_PORT and LUMEN_AGENTS_DIR run a second, test instance: it isn't advertised over Bonjour and only
-// listens on 127.0.0.1, so nothing else on the network can reach it.
+
 let port: UInt16 = env["LUMEN_AGENTS_PORT"].flatMap { UInt16($0) }.flatMap { $0 > 0 ? $0 : nil } ?? 47837
 let dir = env["LUMEN_AGENTS_DIR"].map { URL(fileURLWithPath: $0) }
     ?? home.appendingPathComponent("Library/Application Support/Lumen Agents")
@@ -39,8 +19,6 @@ func log(_ s: String) {
     FileHandle.standardError.write(Data("\(ISO8601DateFormatter().string(from: Date())) \(s)\n".utf8))
 }
 
-// ---- Files --------------------------------------------------------------------------------
-
 func read(_ name: String) -> Data? { try? Data(contentsOf: dir.appendingPathComponent(name)) }
 
 func write(_ name: String, _ data: Data) throws {
@@ -50,10 +28,6 @@ func write(_ name: String, _ data: Data) throws {
     try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
 }
 
-/**
- * Deletes the file. Only "it isn't there" counts as done: any other error (the folder can't be searched or changed,
- * say) is thrown, so nobody is told a key was removed for good when it wasn't.
- */
 func delete(_ name: String) throws {
     do {
         try fm.removeItem(at: dir.appendingPathComponent(name))
@@ -66,7 +40,7 @@ func json(_ data: Data?) -> [String: Any]? {
 }
 
 func encode(_ obj: Any) -> Data {
-    // JSONSerialization raises (not throws) on objects it can't encode.
+
     guard JSONSerialization.isValidJSONObject(obj) else { return Data() }
     return (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data()
 }
@@ -91,13 +65,7 @@ func unhex(_ s: String) -> Data? {
     return out
 }
 
-/**
- * One line without control or invisible formatting characters (names and titles end up in logs and the terminal),
- * capped. The cap counts what you see, so it also limits scalars (four per character, enough for most emoji), keeps
- * at most four combining marks in a row, and reads no further than it needs: one "letter" with thousands of marks
- * stacked on it would otherwise be huge, and slow.
- */
-func clean(_ s: String, _ max: Int) -> String {
+func sanitizeBoundedDisplayLine(_ s: String, _ max: Int) -> String {
     var out = String.UnicodeScalarView()
     var kept = 0, marks = 0, cut = false
     for (i, u) in s.unicodeScalars.enumerated() {
@@ -121,8 +89,7 @@ func clean(_ s: String, _ max: Int) -> String {
     return cut || t.count > max ? String(t.prefix(max - 1)) + "…" : t
 }
 
-/** Compares secrets in constant time. */
-func same(_ a: String, _ b: String) -> Bool {
+func secretEqualsWithoutByteEarlyExit(_ a: String, _ b: String) -> Bool {
     let x = Array(a.utf8), y = Array(b.utf8)
     return x.count == y.count && zip(x, y).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
 }
@@ -139,14 +106,7 @@ func date(_ v: Any?) -> Date? {
     return isoFrac.date(from: s) ?? isoPlain.date(from: s)
 }
 
-// ---- T3 Code ------------------------------------------------------------------------------
-
-/**
- * Whether pid is T3 Code run by you and listening on port: its own app binary (T3 Code.app/Contents/MacOS/T3 Code,
- * "(Beta)" too) owning that listening socket. Checked before the token goes anywhere, so another user who takes the
- * port while T3 Code is stopped gets nothing.
- */
-func isT3(_ pid: Int32, _ port: Int) -> Bool {
+func isCurrentUsersT3Listener(_ pid: Int32, _ port: Int) -> Bool {
     var info = proc_bsdinfo()
     let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
     guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize,
@@ -174,17 +134,16 @@ func isT3(_ pid: Int32, _ port: Int) -> Bool {
     return false
 }
 
-/** The parts of a T3 thread the TV needs. */
 struct Thread {
     let id, title, project, status: String
-    /** Top-level thread a subagent belongs to; nil for chats you started. */
+
     let root: String?
     let hidden: Bool
     let pendingKind: String?
     let pendingAt, startedAt, completedAt, visitedAt, snoozedUntil: Date?
     let planReady: Bool
     let errorClass, error, message: String?
-    /** The model's maker, for the TV's icon: claude, openai, grok, gemini, cursor or opencode. */
+
     let brand, model: String
 
     init?(_ j: [String: Any]) {
@@ -211,7 +170,6 @@ struct Thread {
         brand = Thread.brand(model: model.lowercased(), provider: (j["providerInstanceId"] as? String ?? "").lowercased())
     }
 
-    /** By model first (Cursor can run Grok), then by provider. */
     static func brand(model m: String, provider p: String) -> String {
         if m.hasPrefix("claude") { return "claude" }
         if m.hasPrefix("gpt") || m.hasPrefix("codex") || m.range(of: "^o[0-9]", options: .regularExpression) != nil {
@@ -227,7 +185,6 @@ struct Thread {
         return ""
     }
 
-    /** Finished since you last opened it (the desktop's "Completed" pill). */
     var unseen: Bool {
         guard let done = completedAt, let seen = visitedAt else { return false }
         return done > seen
@@ -239,24 +196,21 @@ let workingStates: Set<String> = ["preparing", "queued", "starting", "running", 
 final class T3 {
     var threads: [String: Thread] = [:]
     var projects: [String: String] = [:]
-    /**
-     * ok, offline (server not running, or the connection dropped) or auth (no access: never authorized, or T3 Code
-     * rejected the token). Only ok shares chats.
-     */
+
     var state = "offline" {
         didSet { if state != oldValue { onChange?() } }
     }
-    /** Called after anything that might change what the TV shows. */
+
     var onChange: (() -> Void)?
     private var sequence = 0
     private var ws: URLSessionWebSocketTask?
     private var retry = 1.0
     private var lastPong = Date()
     private var nextRequest = 1
-    /** Goes up whenever the connection is dropped, so replies to requests made before then are ignored. */
+
     private var generation = 0
     private var issuing = false
-    /** T3 Code rejected the token. Also saved as t3-blocked, so a restart doesn't undo it; authorize() clears both. */
+
     private var rejected = false
     private let session: URLSession = {
         let ops = OperationQueue()
@@ -279,19 +233,13 @@ final class T3 {
     }
     private var pingTimer: DispatchSourceTimer?
 
-    /** T3 Code's server, only while the process that wrote server-runtime.json is T3 Code and still listening. */
     private var base: URL? {
         let runtime = json(try? Data(contentsOf: t3Home.appendingPathComponent("userdata/server-runtime.json")))
         guard let p = runtime?["port"] as? Int, (1...65535).contains(p), let pid = runtime?["pid"] as? Int,
-              (1..<Int(Int32.max)).contains(pid), isT3(Int32(pid), p) else { return nil }
+              (1..<Int(Int32.max)).contains(pid), isCurrentUsersT3Listener(Int32(pid), p) else { return nil }
         return URL(string: "http://127.0.0.1:\(p)")
     }
 
-    /**
-     * The token from `lumen-agents authorize`, unless T3 Code rejected it. Tokens last a year, so an older one isn't
-     * used. None of these are replaced on their own: T3 Code says the same thing for a revoked token as for an
-     * expired one, so a new one only comes from you running authorize.
-     */
     private var token: String? {
         let url = dir.appendingPathComponent("t3-token")
         guard !rejected, read("t3-blocked") == nil,
@@ -309,13 +257,12 @@ final class T3 {
         return r
     }
 
-    /** Loads every thread over HTTP, then follows changes over the WebSocket from that point. */
     private func connect() {
         guard let token else {
             reset()
             if state != "auth" { log("no T3 Code access: run lumen-agents authorize") }
             state = "auth"
-            // Nothing to retry: authorize() connects again.
+
             onChange?()
             return
         }
@@ -378,18 +325,18 @@ final class T3 {
                 guard let msg = json(data) else { return receive(task) }
                 switch msg["_tag"] as? String {
                 case "Chunk":
-                    // The subscription works, so the next failure starts the backoff over.
+
                     retry = 1
                     for v in msg["values"] as? [[String: Any]] ?? [] { apply(v) }
                     onChange?()
-                    // The server waits for an Ack before it sends the next chunk.
+
                     send(task, ["_tag": "Ack", "requestId": msg["requestId"] ?? ""])
                 case "Pong":
                     lastPong = Date()
                 case "Ping":
                     send(task, ["_tag": "Pong"])
                 case "Exit", "Defect", "ClientProtocolError":
-                    return lost(task, "stream ended: \(clean(String(decoding: data ?? Data(), as: UTF8.self), 300))")
+                    return lost(task, "stream ended: \(sanitizeBoundedDisplayLine(String(decoding: data ?? Data(), as: UTF8.self), 300))")
                 default:
                     break
                 }
@@ -402,20 +349,12 @@ final class T3 {
         task.send(.string(String(decoding: encode(obj), as: UTF8.self))) { _ in }
     }
 
-    /**
-     * T3 Code closes the stream at once when you revoke the token, so this is where a revocation shows up: the
-     * reconnect then gets 401 and stops in reject().
-     */
     private func lost(_ task: URLSessionWebSocketTask, _ why: String) {
         guard task === ws else { return }
         log("T3 stream lost: \(why)")
         offline()
     }
 
-    /**
-     * Forgets the chats and the stream and ignores replies still on their way, so nothing from before the drop can
-     * reach the TV. The next connect() starts over from a fresh snapshot.
-     */
     private func reset() {
         generation += 1
         if let task = ws {
@@ -427,7 +366,6 @@ final class T3 {
         sequence = 0
     }
 
-    /** Not reachable for now: no chats until it's back, then the same token again. */
     private func offline() {
         reset()
         state = "offline"
@@ -435,10 +373,6 @@ final class T3 {
         later()
     }
 
-    /**
-     * T3 Code turned the token down: revoked, or expired (it doesn't say which). No chats, no retries and no new
-     * token until you run `lumen-agents authorize`, across restarts too (t3-blocked, and the token is deleted).
-     */
     private func reject(_ why: String) {
         log("T3 Code rejected the token (\(why)); run lumen-agents authorize to allow it again")
         reset()
@@ -452,7 +386,7 @@ final class T3 {
     private func later() {
         let wait = retry, gen = generation
         retry = min(retry * 2, 30)
-        // One retry at a time: a newer drop has scheduled its own.
+
         q.asyncAfter(deadline: .now() + wait) { [self] in if gen == generation && ws == nil { connect() } }
     }
 
@@ -478,7 +412,7 @@ final class T3 {
         switch item["kind"] as? String {
         case "snapshot":
             guard let snap = item["snapshot"] as? [String: Any] else { return }
-            // Repository-identity refreshes reuse this shape but only carry projects.
+
             if item["resolvedRepositoryIdentityRoots"] != nil { applyProjects(snap["projects"]) }
             else { applySnapshot(snap) }
         case "project.updated":
@@ -495,10 +429,6 @@ final class T3 {
         }
     }
 
-    /**
-     * `lumen-agents authorize`: you allow it, so it gets a new read-only token with T3's own CLI and connects. The
-     * only way a token is made. done gets nil, or what went wrong.
-     */
     func authorize(_ done: @escaping (String?) -> Void) {
         guard !issuing else { return done("Already asking T3 Code for a token; try again in a moment.") }
         let cli = t3Home.appendingPathComponent("bin/t3")
@@ -518,7 +448,7 @@ final class T3 {
                 guard proc.terminationStatus == 0 && !token.isEmpty else {
                     return done("t3 auth session issue failed (\(proc.terminationStatus)). Is T3 Code installed?")
                 }
-                // The token first: if clearing t3-blocked fails, it stays off.
+
                 do {
                     try write("t3-token", Data(token.utf8))
                     try delete("t3-blocked")
@@ -539,7 +469,6 @@ final class T3 {
         }
     }
 
-    /** What the TV shows: chats working, waiting for you, or finished since you last looked. */
     func chats() -> [[String: Any]] {
         let now = Date()
         var subagentRequests: [String: Thread] = [:]
@@ -571,11 +500,11 @@ final class T3 {
             } else {
                 continue
             }
-            var chat: [String: Any] = ["id": clean(t.id, 100), "title": clean(t.title, 200), "state": state,
-                                       "detail": detail, "project": clean(projects[t.project] ?? "", 80),
-                                       "brand": t.brand, "model": clean(t.model, 80)]
+            var chat: [String: Any] = ["id": sanitizeBoundedDisplayLine(t.id, 100), "title": sanitizeBoundedDisplayLine(t.title, 200), "state": state,
+                                       "detail": detail, "project": sanitizeBoundedDisplayLine(projects[t.project] ?? "", 80),
+                                       "brand": t.brand, "model": sanitizeBoundedDisplayLine(t.model, 80)]
             if let at { chat["age"] = Int(max(0, min(now.timeIntervalSince(at), 1e9))) }
-            let s = clean(text ?? "", 280)
+            let s = sanitizeBoundedDisplayLine(text ?? "", 280)
             if !s.isEmpty { chat["text"] = s }
             out.append((rank, at ?? now, chat))
         }
@@ -584,17 +513,13 @@ final class T3 {
     }
 }
 
-// ---- Pairing ------------------------------------------------------------------------------
-
 struct Device {
     let name: String
     let key: SymmetricKey
 }
 
-/** Crockford base32, as the TV writes the code. */
 let codeAlphabet = Set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
 
-/** The code as typed: any case, dashes and spaces optional, O for 0 and I or L for 1. */
 func normalize(_ typed: String) -> String? {
     let code = String(typed.uppercased().compactMap { c -> Character? in
         switch c {
@@ -607,8 +532,7 @@ func normalize(_ typed: String) -> String? {
     return code.count == 16 && code.allSatisfy(codeAlphabet.contains) ? code : nil
 }
 
-/** SHA-256 over length-prefixed parts (AgentStatus.derive on the TV does the same). */
-func derive(_ parts: [Data]) -> SymmetricKey {
+func deriveLengthPrefixedPairingKey(_ parts: [Data]) -> SymmetricKey {
     var h = SHA256()
     for p in parts {
         h.update(data: Data([UInt8(p.count >> 8 & 0xFF), UInt8(p.count & 0xFF)]))
@@ -619,31 +543,23 @@ func derive(_ parts: [Data]) -> SymmetricKey {
 
 final class Pairing {
     private(set) var devices: [String: Device] = [:]
-    /**
-     * TVs waiting for `lumen-agents pair <code>`, dropped after 15 minutes. The key needs the code too, which never
-     * leaves the TV, so until then the Mac keeps the ECDH secret and the TV's latest signed request, and checks that
-     * request against the code you type.
-     */
+
     private var pending: [String: Pending] = [:]
     private var lastTime: [String: Int64] = [:]
-    /** Recent /pair requests by source (see Server.source()). */
+
     private var pairTimes: [String: [Date]] = [:]
-    /**
-     * A removal isn't on disk yet (persist() failed), so the old key would come back after a restart. The next
-     * unpair, or anything else that saves, tries again even if it removes nothing itself.
-     */
+
     private(set) var unsaved = false
 
     struct Pending {
         let name, source: String
         let secret, tvKey, macKey: Data
         let made, expires: Date
-        /** When the TV last sent a signed /status: it does every few seconds while it shows the code. */
+
         var seen: Date
         var request: (signed: Data, mac: Data, time: Int64)?
     }
 
-    /** Keys made by this pairing scheme are marked "v": 2; older ones (six-digit codes) are dropped. */
     init() {
         var old = 0
         for (id, v) in json(read("devices.json")) ?? [:] {
@@ -652,11 +568,11 @@ final class Pairing {
                 old += 1
                 continue
             }
-            devices[id] = Device(name: clean(d["name"] as? String ?? "TV", 60), key: SymmetricKey(data: k))
+            devices[id] = Device(name: sanitizeBoundedDisplayLine(d["name"] as? String ?? "TV", 60), key: SymmetricKey(data: k))
         }
         if old > 0 {
             log("dropped \(old) TV key(s) from an older pairing scheme; those TVs pair again")
-            if case .failed(let why) = persist() { log(why) }
+            if case .failed(let why) = persistRemovalOrDeletePairingStore() { log(why) }
         }
     }
 
@@ -672,18 +588,13 @@ final class Pairing {
     enum Saved {
         case saved, cleared, failed(String)
 
-        /** Whether a removal survives a restart. */
-        var lasts: Bool {
+        var survivesRestart: Bool {
             if case .failed = self { return false }
             return true
         }
     }
 
-    /**
-     * Saves a removal so the key can't come back after a restart. If devices.json can't be written it's deleted
-     * instead (every TV pairs again after a restart: .cleared); .failed if even that didn't work.
-     */
-    private func persist() -> Saved {
+    private func persistRemovalOrDeletePairingStore() -> Saved {
         do {
             try save()
             return .saved
@@ -702,11 +613,6 @@ final class Pairing {
         }
     }
 
-    /**
-     * Agrees a secret with the TV (P-256 ECDH). Ten tries a minute per source and 120 in all. Each source keeps its
-     * two newest requests, and when 64 are waiting the one that has gone quiet longest makes room, so blocking a real
-     * TV takes many addresses that all keep polling.
-     */
     func begin(_ body: [String: Any], from: String) -> (Int, [String: Any]) {
         let now = Date()
         pairTimes = pairTimes.compactMapValues { times in
@@ -724,7 +630,7 @@ final class Pairing {
         guard let shared = try? mine.sharedSecretFromKeyAgreement(with: tvKey) else { return (400, ["error": "bad key"]) }
         let id = hex(SHA256.hash(data: der).prefix(8))
         guard pending[id] == nil, devices[id] == nil else { return (400, ["error": "bad key"]) }
-        let name = clean(body["name"] as? String ?? "TV", 60)
+        let name = sanitizeBoundedDisplayLine(body["name"] as? String ?? "TV", 60)
         let theirs = pending.filter { $0.value.source == from }
         if theirs.count >= 2, let oldest = theirs.min(by: { $0.value.made < $1.value.made }) { pending[oldest.key] = nil }
         if pending.count >= 64, let quiet = pending.min(by: { $0.value.seen < $1.value.seen }) { pending[quiet.key] = nil }
@@ -735,16 +641,12 @@ final class Pairing {
         return (200, ["key": mine.publicKey.derRepresentation.base64EncodedString(), "mac": macName])
     }
 
-    /**
-     * Pairs the waiting TV whose latest request was signed with the key this code makes. Throws if the key can't be
-     * saved: that TV would be unknown after a restart, so it isn't paired at all.
-     */
     func approve(_ typed: String) throws -> String? {
         guard let code = normalize(typed) else { return nil }
         let now = Date()
         for (id, p) in pending where p.expires > now {
             guard let r = p.request else { continue }
-            let key = derive([Data("lumen-agents/v2".utf8), p.secret, Data(code.utf8), p.tvKey, p.macKey])
+            let key = deriveLengthPrefixedPairingKey([Data("lumen-agents/v2".utf8), p.secret, Data(code.utf8), p.tvKey, p.macKey])
             guard HMAC<SHA256>.isValidAuthenticationCode(r.mac, authenticating: r.signed, using: key) else { continue }
             devices[id] = Device(name: p.name, key: key)
             do { try save() } catch {
@@ -758,40 +660,28 @@ final class Pairing {
         return nil
     }
 
-    /**
-     * "Pair again" on the TV: it asks with a request signed by its own key, so it can only remove itself. Gone at
-     * once either way; the result says whether that survives a restart.
-     */
     func remove(_ id: String) -> Saved {
-        guard let d = devices.removeValue(forKey: id) else { return unsaved ? persist() : .saved }
+        guard let d = devices.removeValue(forKey: id) else { return unsaved ? persistRemovalOrDeletePairingStore() : .saved }
         lastTime[id] = nil
         log("\(d.name) forgot its key")
-        return persist()
+        return persistRemovalOrDeletePairingStore()
     }
 
-    /**
-     * Returns the ids it removed (at once) and whether that, and any earlier removal that couldn't be saved,
-     * survives a restart. So running the same unpair again after fixing the folder saves the earlier one.
-     */
     func forget(_ which: String) -> (gone: [String], saved: Saved) {
         let gone = devices.filter { which == "all" || $0.key == which || $0.value.name == which }.map(\.key)
         for id in gone {
             devices[id] = nil
             lastTime[id] = nil
         }
-        return (gone, gone.isEmpty && !unsaved ? .saved : persist())
+        return (gone, gone.isEmpty && !unsaved ? .saved : persistRemovalOrDeletePairingStore())
     }
 
     enum Check { case ok(String, SymmetricKey), pending, unknown }
 
-    /**
-     * X-Lumen-Auth is HMAC(key, "<method> <path and query>\n<time>"); times must be recent and only go up, so replays
-     * fail. A waiting TV's request can't be checked yet, so it's only kept for approve().
-     */
     func check(_ r: Request) -> Check {
         guard let id = r.headers["x-lumen-device"], let time = r.headers["x-lumen-time"], let t = Int64(time),
               let mac = r.headers["x-lumen-auth"].flatMap(unhex) else { return .unknown }
-        // Bounds around now rather than now - t, which a huge t could overflow.
+
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         guard t > now - 600_000, t < now + 600_000, t > lastTime[id] ?? 0 else { return .unknown }
         let signed = Data("\(r.method) \(r.target)\n\(time)".utf8)
@@ -800,7 +690,7 @@ final class Pairing {
             lastTime[id] = t
             return .ok(id, d.key)
         }
-        // Only a status request can be approved later.
+
         guard r.method == "GET", r.path == "/status", var p = pending[id], p.expires > Date() else { return .unknown }
         p.request = (signed, mac, t)
         p.seen = Date()
@@ -808,8 +698,6 @@ final class Pairing {
         return .pending
     }
 }
-
-// ---- LAN server ---------------------------------------------------------------------------
 
 struct Request {
     let method, path, target: String
@@ -819,7 +707,6 @@ struct Request {
 
     enum Parsed { case more, bad, ok(Request) }
 
-    /** Parses a complete HTTP/1.1 request; anything odd is .bad. Small heads and bodies only (the TV sends tiny ones). */
     static func parse(_ buf: Data) -> Parsed {
         guard let end = buf.range(of: Data("\r\n\r\n".utf8)) else { return buf.count > 8192 ? .bad : .more }
         guard end.lowerBound - buf.startIndex <= 8192,
@@ -839,7 +726,7 @@ struct Request {
         for line in lines.dropFirst() {
             guard let c = line.firstIndex(of: ":"), c != line.startIndex, h.count < 64 else { return .bad }
             let name = line[..<c].lowercased()
-            // One plain length only: no chunked bodies, no conflicting lengths.
+
             if name == "transfer-encoding" || (name == "content-length" && h[name] != nil) { return .bad }
             h[name] = line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)
         }
@@ -861,17 +748,14 @@ final class Server {
     let pairing = Pairing()
     private var listener: NWListener?
     private let helperId: String
-    /**
-     * Long polling: the TV sends the version it has, and the reply waits until something changes (or 45 s pass),
-     * so it hears about a finished chat at once without asking every few seconds.
-     */
+
     private var version = Int.random(in: 1..<1_000_000)
     private var shownKey = ""
     private var waiting: [(c: NWConnection, r: Request, id: String, key: SymmetricKey, until: Date)] = []
     private var open = 0
-    /** Open connections by source (see source()). */
+
     private var sources: [String: Int] = [:]
-    /** The lumen-agents command reads this file (only you can) and sends it with each request. New every start. */
+
     private let adminSecret = hex(SymmetricKey(size: .bits256).withUnsafeBytes { Array($0) })
 
     init(_ t3: T3) {
@@ -895,7 +779,6 @@ final class Server {
     }
     private var ticker: DispatchSourceTimer?
 
-    /** Wakes waiting TVs when the chats change, and lets the others go after 45 s. */
     private func changed() {
         let key = t3.state + "\n" + t3.chats().map { "\($0["id"] ?? "") \($0["state"] ?? "") \($0["detail"] ?? "") \($0["title"] ?? "")" }
             .joined(separator: "\n")
@@ -909,7 +792,6 @@ final class Server {
         waiting = due
     }
 
-    /** A removed TV's waiting requests are closed without a reply, so its old key gets nothing more. */
     private func drop(_ ids: [String]) {
         for w in waiting where ids.contains(w.id) { w.c.cancel() }
         waiting.removeAll { ids.contains($0.id) }
@@ -941,8 +823,7 @@ final class Server {
     }
 
     private func handle(_ c: NWConnection) {
-        // A few TVs and the command line need a handful; more is a flood. Eight per device and 56 from the network,
-        // so the lumen-agents command (loopback, its own eight) still gets in when the network is full.
+
         let from = source(c), mine = sources[from] ?? 0
         guard mine < 8, from == "local" || open - (sources["local"] ?? 0) < 56 else { return c.cancel() }
         open += 1
@@ -958,7 +839,7 @@ final class Server {
         c.start(queue: q)
         var buf = Data()
         var complete = false
-        // Weak, so a closed connection isn't kept for the full 90 s.
+
         q.asyncAfter(deadline: .now() + 10) { [weak c] in if !complete { c?.cancel() } }
         q.asyncAfter(deadline: .now() + 90) { [weak c] in c?.cancel() }
         func next() {
@@ -980,7 +861,6 @@ final class Server {
         next()
     }
 
-    /** "local" for loopback, else the address (IPv4-mapped IPv6 as IPv4). */
     private func source(_ c: NWConnection) -> String {
         guard case .hostPort(let host, _) = c.endpoint else { return "?" }
         switch host {
@@ -993,7 +873,7 @@ final class Server {
     }
 
     private func respond(_ c: NWConnection, _ r: Request) {
-        // Browsers send Origin; the TV and the lumen-agents command never do.
+
         if r.headers["origin"] != nil { return send(c, 403, ["error": "forbidden"]) }
         switch (r.method, r.path) {
         case ("GET", "/status"):
@@ -1004,7 +884,7 @@ final class Server {
                 } else {
                     sealed(c, 200, status(), key, r)
                 }
-            // Not sealed: there's no key until the code is typed here. The TV only trusts sealed replies once paired.
+
             case .pending: send(c, 403, ["error": "pending"])
             case .unknown: send(c, 401, ["error": "unknown device"])
             }
@@ -1016,8 +896,8 @@ final class Server {
             let saved = pairing.remove(id)
             drop([id])
             if case .failed(let why) = saved { log(why) }
-            // The TV forgets its own key whatever this says.
-            sealed(c, 200, encode(["forgot": saved.lasts]), key, r)
+
+            sealed(c, 200, encode(["forgot": saved.survivesRestart]), key, r)
         case (_, "/approve"), (_, "/devices"), (_, "/unpair"), (_, "/debug"), (_, "/authorize"):
             admin(c, r)
         default:
@@ -1025,14 +905,10 @@ final class Server {
         }
     }
 
-    /**
-     * For the lumen-agents command on this Mac only: from loopback, with the admin secret, and addressed to
-     * 127.0.0.1 or localhost (so a web page can't reach it through DNS rebinding).
-     */
     private func admin(_ c: NWConnection, _ r: Request) {
         guard source(c) == "local" else { return send(c, 404, ["error": "not found"]) }
         guard ["127.0.0.1:\(port)", "localhost:\(port)"].contains((r.headers["host"] ?? "").lowercased()),
-              same(r.headers["authorization"] ?? "", "Bearer " + adminSecret)
+              secretEqualsWithoutByteEarlyExit(r.headers["authorization"] ?? "", "Bearer " + adminSecret)
         else { return send(c, 403, ["error": "forbidden"]) }
         switch (r.method, r.path) {
         case ("POST", "/approve"):
@@ -1073,7 +949,6 @@ final class Server {
         }
     }
 
-    /** At most 64 KB (the TV reads up to 1 MB): without the last messages if needed, then with fewer chats. */
     private func status() -> Data {
         var chats = t3.state == "ok" ? t3.chats() : []
         var withText = true
@@ -1089,10 +964,6 @@ final class Server {
         }
     }
 
-    /**
-     * AES-GCM with the paired key, bound to the request's time: nonce + ciphertext + tag. Only the TV can read it,
-     * and it can tell the reply is really from this Mac and for this request.
-     */
     private func sealed(_ c: NWConnection, _ code: Int, _ body: Data, _ key: SymmetricKey, _ r: Request) {
         let aad = Data((r.headers["x-lumen-time"] ?? "").utf8)
         guard let box = try? AES.GCM.seal(body, using: key, authenticating: aad).combined else {
@@ -1114,9 +985,6 @@ final class Server {
     }
 }
 
-// ---- Command line -------------------------------------------------------------------------
-
-/** Talks to the running helper on this Mac. */
 func local(_ method: String, _ path: String, _ body: String = "", wait: TimeInterval = 5) -> (Int, [String: Any]) {
     var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!, timeoutInterval: wait)
     r.httpMethod = method
@@ -1157,7 +1025,7 @@ case "devices":
     if list.isEmpty { print("No TVs paired.") }
     for d in list { print("\(d["name"] ?? "")  (\(d["id"] ?? ""))") }
 case "authorize" where args.count == 1:
-    // T3's CLI can take a while to start.
+
     let (code, reply) = local("POST", "/authorize", wait: 60)
     print(code == 200 ? "T3 Code access allowed. The TV shows your chats in a few seconds."
         : "\(reply["error"] ?? "Failed (HTTP \(code))")")

@@ -1,7 +1,3 @@
-// Offline tests for Lumen Agents' T3 Code access and pairing removal; run with mac/tests/run.sh. They build the
-// helper from mac/LumenAgents.swift and run it against FakeT3 and a fake t3 command, all in a temporary folder:
-// nothing on this Mac's real T3 Code, Lumen Agents or TVs is read or changed, and nothing leaves loopback.
-//   AgentsTests <helper> <fake T3 Code binary> <work folder>
 import CryptoKit
 import Foundation
 
@@ -34,7 +30,6 @@ func touch(_ name: String, _ text: String = "") {
 
 func append(_ name: String, _ line: String) { touch(name, file(control.appendingPathComponent(name)) + line + "\n") }
 
-/** How many tokens the fake t3 command has issued. */
 var issued: Int { file(control.appendingPathComponent("tokens")).split(separator: "\n").count }
 
 func until(_ seconds: Double, _ test: () -> Bool) -> Bool {
@@ -45,8 +40,6 @@ func until(_ seconds: Double, _ test: () -> Bool) -> Bool {
     }
     return test()
 }
-
-// ---- Processes ------------------------------------------------------------------------------
 
 let env: [String: String] = {
     var e = ProcessInfo.processInfo.environment
@@ -79,7 +72,6 @@ func stopHelper() {
     serving = nil
 }
 
-/** Runs the lumen-agents command against the test helper. */
 func command(_ args: String...) -> (status: Int32, out: String) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: helper)
@@ -92,8 +84,6 @@ func command(_ args: String...) -> (status: Int32, out: String) {
     p.waitUntilExit()
     return (p.terminationStatus, text)
 }
-
-// ---- HTTP -------------------------------------------------------------------------------------
 
 let session = URLSession(configuration: .ephemeral)
 
@@ -108,7 +98,6 @@ func http(_ r: URLRequest) -> (Int, Data) {
     return result
 }
 
-/** What the lumen-agents command sends; pass the secret when the folder it's in can't be read. */
 func admin(_ method: String, _ path: String, _ body: String = "", secret: String? = nil) -> (Int, Data) {
     var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!, timeoutInterval: 5)
     r.httpMethod = method
@@ -118,7 +107,6 @@ func admin(_ method: String, _ path: String, _ body: String = "", secret: String
     return http(r)
 }
 
-/** This Mac's own addresses other than loopback, where something else on the network would connect. */
 func networkAddresses() -> [String] {
     var list: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&list) == 0 else { return [] }
@@ -135,7 +123,6 @@ func networkAddresses() -> [String] {
     return out
 }
 
-/** Whether a TCP connection to address:port is accepted. */
 func accepts(_ address: String, _ port: Int) -> Bool {
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     defer { close(fd) }
@@ -149,7 +136,6 @@ func accepts(_ address: String, _ port: Int) -> Bool {
     } == 0
 }
 
-/** A TV, doing what AgentStatus.java does. */
 final class TV {
     let mine = P256.KeyAgreement.PrivateKey()
     var key = SymmetricKey(size: .bits256)
@@ -157,7 +143,6 @@ final class TV {
     var id: String { hex(SHA256.hash(data: mine.publicKey.derRepresentation).prefix(8)) }
     private var last: Int64 = 0
 
-    /** Starts pairing, as the TV does when it shows a code; returns the code to type on the Mac. */
     func begin() -> String {
         let der = mine.publicKey.derRepresentation
         var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/pair")!, timeoutInterval: 5)
@@ -176,19 +161,17 @@ final class TV {
             h.update(data: p)
         }
         key = SymmetricKey(data: h.finalize())
-        // The Mac keeps the latest signed request to check the code against.
+
         _ = status()
         return code
     }
 
-    /** Pairs it for good: begin(), then lumen-agents pair. */
     func pair() {
         let code = begin()
         let r = command("pair", code)
         precondition(r.status == 0, "lumen-agents pair: \(r.out)")
     }
 
-    /** A signed /status; the reply opened when it's sealed with our key. */
     func status(wait version: Int? = nil, timeout: Double = 5) -> (code: Int, body: [String: Any]?) {
         let target = version.map { "/status?wait=\($0)" } ?? "/status"
         last = max(Int64(Date().timeIntervalSince1970 * 1000), last + 1)
@@ -211,11 +194,9 @@ final class TV {
     var version: Int { status().body?["version"] as? Int ?? -1 }
 }
 
-// ---- Setup ------------------------------------------------------------------------------------
-
 try! fm.createDirectory(at: control, withIntermediateDirectories: true)
 try! fm.createDirectory(at: t3Home.appendingPathComponent("bin"), withIntermediateDirectories: true)
-// The fake t3 command: records each token it issues (FakeT3 accepts only those) and the arguments it got.
+
 let cli = t3Home.appendingPathComponent("bin/t3")
 try! """
 #!/bin/sh
@@ -235,8 +216,6 @@ precondition(until(5) { fm.fileExists(atPath: t3Home.appendingPathComponent("use
 startHelper()
 let tv = TV()
 tv.pair()
-
-// ---- Tests ------------------------------------------------------------------------------------
 
 print("The test helper is on loopback only")
 check(accepts("127.0.0.1", port), "it accepts connections on 127.0.0.1")
@@ -274,7 +253,7 @@ check(until(10) { tv.t3 == "ok" && tv.titles == ["Fresh chat"] }, "it reconnects
 check(issued == 1, "with the same token (none issued)")
 
 print("A reply to a request made before the connection was replaced")
-// The next snapshot is slow and stale; meanwhile you authorize again and the old token is revoked.
+
 touch("delay", "3 STALE")
 touch("drop")
 check(until(3) { tv.t3 == "offline" }, "the drop is seen")
@@ -319,7 +298,7 @@ try? fm.removeItem(at: agentsDir.appendingPathComponent("t3-blocked"))
 stopHelper()
 startHelper()
 check(until(5) { tv.t3 == "auth" }, "nor with t3-blocked deleted (there's no token)")
-// An old token put back while blocked isn't used either.
+
 try! Data("tok-2".utf8).write(to: agentsDir.appendingPathComponent("t3-token"))
 try! Data().write(to: agentsDir.appendingPathComponent("t3-blocked"))
 stopHelper()
@@ -336,7 +315,7 @@ check(until(5) { tv.t3 == "ok" && tv.titles == ["Fresh chat"] }, "and the TV get
 check(!fm.fileExists(atPath: agentsDir.appendingPathComponent("t3-blocked").path), "t3-blocked is cleared")
 
 print("An old token")
-// Backdates the token file, which is how the helper tells its age.
+
 func age(_ days: Double) {
     try! fm.setAttributes([.modificationDate: Date().addingTimeInterval(-days * 86_400)],
                           ofItemAtPath: agentsDir.appendingPathComponent("t3-token").path)
@@ -410,7 +389,7 @@ check(other.status().code == 401, "the removed TV is still turned away after a r
 check(keep.status().code == 200, "and the TV that wasn't unpaired still works")
 
 print("Unpairing when the folder can't even be searched")
-// The lumen-agents command reads the admin secret from that folder, so this asks the helper directly.
+
 let secret = file(agentsDir.appendingPathComponent("admin"))
 let kept = file(devices)
 try! fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: agentsDir.path)

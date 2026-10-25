@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Your T3 Code chats from the Mac: working, waiting for you, done or failed. New ones slide in. */
 final class AgentsCard extends LinearLayout {
     private static final int MAX_ROWS = 3;
 
@@ -31,7 +30,7 @@ final class AgentsCard extends LinearLayout {
     Callbacks callbacks;
     private final TextView label;
     private final List<Row> rows = new ArrayList<>();
-    /** The state each chat had when it was last shown, so only new ones and changes animate. */
+
     private final Map<String, String> shownStates = new HashMap<>();
 
     AgentsCard(Context c) {
@@ -50,7 +49,6 @@ final class AgentsCard extends LinearLayout {
         addView(label);
     }
 
-    /** Shows the snapshot; returns false when there's nothing worth showing (no active chats). */
     boolean bind(AgentStatus.Snapshot s) {
         List<Line> lines = new ArrayList<>();
         String head;
@@ -62,13 +60,13 @@ final class AgentsCard extends LinearLayout {
                     "Can't reach Lumen Agents on " + s.mac + ". Unpaired it? Settings › Pair again"));
         } else if (s.phase == AgentStatus.PAIRING) {
             head = "AGENTS  ·  PAIR WITH " + s.mac.toUpperCase(Locale.ROOT);
-            // Focused, the hero shows the code large, with the command under it.
+
             String code = AgentStatus.grouped(s.code);
             lines.add(new Line("pair", code, "Type on the Mac", 0xFFFFFFFF, null,
                     "On the Mac:  lumen-agents pair " + code));
         } else if (!"ok".equals(s.t3)) {
             head = "AGENTS";
-            // auth: never allowed, or T3 Code rejected the token (revoked or expired). Only you can allow it again.
+
             boolean offline = "offline".equals(s.t3);
             lines.add(new Line("t3", offline ? "T3 Code isn't running" : "T3 Code access needed", "", 0x66FFFFFF,
                     null, offline ? "on " + s.mac : "On " + s.mac + ":  lumen-agents authorize"));
@@ -98,7 +96,7 @@ final class AgentsCard extends LinearLayout {
     }
 
     private void show(List<Line> lines) {
-        // Keep focus on the same chat (or the same spot) as rows are reused.
+
         int focusedRow = -1;
         String focusedKey = null;
         for (int i = 0; i < rows.size(); i++) {
@@ -127,7 +125,6 @@ final class AgentsCard extends LinearLayout {
         }
     }
 
-    /** The model maker's logo, or 0 if it's one we don't have. */
     static int icon(String brand) {
         switch (brand) {
             case "claude": return R.drawable.brand_claude;
@@ -140,7 +137,6 @@ final class AgentsCard extends LinearLayout {
         }
     }
 
-    /** One-colour logos follow the text colour; Claude and Gemini keep their own. */
     static boolean tinted(String brand) {
         return !"claude".equals(brand) && !"gemini".equals(brand);
     }
@@ -179,7 +175,6 @@ final class AgentsCard extends LinearLayout {
         return String.join("  ·  ", parts) + "  ·  OK for details";
     }
 
-    /** "claude-opus-5-5" → "Claude Opus 5.5", "gpt-6.1-sol" → "GPT-6.1 Sol". */
     static String modelName(String id) {
         StringBuilder b = new StringBuilder();
         boolean lastNumber = false;
@@ -241,10 +236,6 @@ final class AgentsCard extends LinearLayout {
         }
     }
 
-    /**
-     * One chat: the model's logo, its title, and a dot in the state's colour beside the state. White when focused,
-     * like the other pills.
-     */
     private final class Row extends LinearLayout {
         final ImageView logo;
         final View dot, stateDot;
@@ -301,7 +292,6 @@ final class AgentsCard extends LinearLayout {
             });
         }
 
-        /** A new chat, or one that changed state: fades in, sliding a little from the right. */
         void slideIn() {
             setAlpha(0f);
             setTranslationX(Ui.dp(getContext(), 16));
@@ -325,7 +315,7 @@ final class AgentsCard extends LinearLayout {
                 logo.setImageResource(logoRes);
                 logo.setImageTintList(tinted(brand) ? Ui.onPill(false) : null);
             }
-            // With a logo the state's colour moves to a dot beside the state.
+
             dot.setVisibility(logoRes != 0 ? GONE : VISIBLE);
             stateDot.setVisibility(logoRes != 0 && !l.status.isEmpty() ? VISIBLE : GONE);
             ((GradientDrawable) dot.getBackground()).setColor(l.color);

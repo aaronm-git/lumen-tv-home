@@ -3,7 +3,6 @@ package org.json;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Test stand-in: only what AgentStatus uses. */
 public class JSONArray {
     final List<Object> list = new ArrayList<>();
 

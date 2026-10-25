@@ -9,7 +9,6 @@ import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.view.View;
 
-/** Near-black backdrop lit by a soft glow that fades to the focused app's colour. */
 final class GlowBackground extends View {
     private static final int BASE = 0xFF07080B;
 

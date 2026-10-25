@@ -13,23 +13,13 @@ import android.view.accessibility.AccessibilityEvent;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Google TV always sends Home to its own launcher, so this service catches the Home button
- * and opens Lumen. If the stock home screen still appears some other way, it hops back to Lumen.
- *
- * It's always running, so it also shows agent notifications: when a T3 Code chat finishes, fails or needs you
- * while you're in another app, a small card appears over it (see AgentAlert). Only while the TV is on.
- */
 public class HomeKeyService extends AccessibilityService {
-    /**
-     * Google TV's home screen (and its .home.HomeActivity below; also in res/xml/home_key_service.xml). Other
-     * Android TV devices are untested; there the normal default-home choice may work without this service.
-     */
+
     private static final String STOCK_HOME = "com.google.android.apps.tv.launcherx";
 
     private AgentStatus agents;
     private AgentAlert alert;
-    /** Each chat's state when we last heard; null until the first reply, so old news isn't announced. */
+
     private Map<String, String> lastStates;
     private final AgentStatus.Listener agentListener = this::onAgents;
     private final SharedPreferences.OnSharedPreferenceChangeListener prefsListener = (sp, key) -> update();
@@ -89,7 +79,6 @@ public class HomeKeyService extends AccessibilityService {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
     }
 
-    /** Listens to the Mac only while notifications are on and the screen is awake. */
     private void update() {
         boolean on = Prefs.agentAlerts(this);
         if (!on) {
@@ -103,8 +92,7 @@ public class HomeKeyService extends AccessibilityService {
     private void onAgents(AgentStatus.Snapshot s) {
         if (!Prefs.agentAlerts(this)) return;
         if (!s.active()) {
-            // The Mac or T3 Code went away, or access ended: take down a card that's up, and announce nothing that
-            // happened meanwhile when it's back.
+
             alert.hide();
             lastStates = null;
             return;
@@ -115,12 +103,12 @@ public class HomeKeyService extends AccessibilityService {
         for (AgentStatus.Chat c : s.chats) {
             now.put(c.id, c.state);
             if (lastStates != null && !"working".equals(c.state) && !c.state.equals(lastStates.get(c.id))) {
-                if (first == null) first = c;  // Chats come most urgent first.
+                if (first == null) first = c;
                 count++;
             }
         }
         lastStates = now;
-        // On the home screen the Agents card already shows it.
+
         if (first != null && !HomeActivity.showing) alert.show(first, count, s.mac);
     }
 }

@@ -3,7 +3,6 @@ package android.os;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Test stand-in: a queue of runnables run in time order on one thread. */
 public final class Looper {
     private static Looper main;
 

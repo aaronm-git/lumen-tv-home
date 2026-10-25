@@ -9,7 +9,6 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 
-/** Small drawing helpers shared by the home screen views. */
 final class Ui {
     static final int SLATE = 0xFF4A5A7A;
     private static final int[] FOCUSED = {android.R.attr.state_focused};
@@ -33,7 +32,6 @@ final class Ui {
                 Math.round(Color.blue(from) * s + Color.blue(to) * t));
     }
 
-    /** White when focused, faint glass otherwise. */
     static StateListDrawable pill(float radius) {
         GradientDrawable on = new GradientDrawable();
         on.setCornerRadius(radius);
@@ -64,7 +62,6 @@ final class Ui {
         return d;
     }
 
-    /** The most vivid colour in a banner or icon, brightened so it glows on black. */
     static int accent(Drawable source) {
         if (source == null) return SLATE;
         Drawable d = source.getConstantState() != null

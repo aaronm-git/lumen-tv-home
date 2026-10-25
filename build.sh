@@ -1,8 +1,4 @@
 #!/bin/sh
-# Builds Lumen without Gradle.
-#   ./build.sh                  build lumen.apk
-#   ./build.sh <tv-ip:port>     build it and install it on the TV over ADB
-#   ./build.sh grant <tv-ip:port>  grant the one permission Lumen needs (says what it is first)
 set -eu
 cd "$(dirname "$0")"
 
@@ -35,7 +31,6 @@ javac --release 17 -Xlint:-options -classpath "$JAR" -d "$OUT/classes" $(find sr
 (cd "$OUT/dex" && zip -q ../unsigned.apk classes.dex)
 "$BT/zipalign" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
-# Updates must be signed with the same key, so it is made once and kept in keys/.
 if [ ! -f keys/lumen.jks ]; then
     mkdir -p keys
     (umask 077 && openssl rand -hex 16 > keys/password)

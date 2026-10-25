@@ -13,10 +13,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/**
- * A small card in the top-right corner, over whatever is playing, when a T3 Code chat finishes, fails or needs
- * you. It can't take focus or touches, so the remote keeps controlling the app underneath.
- */
 final class AgentAlert {
     private static final long SHOW_MS = 8000, GAP_MS = 10_000;
 
@@ -24,16 +20,14 @@ final class AgentAlert {
     private final WindowManager wm;
     private LinearLayout card;
     private final Runnable hide = this::hide;
-    /** When the last alert appeared. One per GAP_MS, so a busy (or hostile) Mac can't keep a card up all the time. */
+
     private long shownAt = -GAP_MS;
 
-    /** c must be able to add accessibility overlays (the accessibility service). */
     AgentAlert(Context c) {
         this.c = c;
         wm = (WindowManager) c.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /** Shows the most urgent chat; more than one is mentioned in the label. */
     void show(AgentStatus.Chat chat, int count, String mac) {
         long now = SystemClock.uptimeMillis();
         if (now - shownAt < GAP_MS) return;

@@ -12,14 +12,10 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-/**
- * Adds what you watch to the watch history. Something counts once it has played for 20 seconds
- * (so trailers and quick peeks don't), and its progress is saved every 30 seconds and on pause.
- */
 final class WatchRecorder implements NowPlaying.Listener {
     private static final long DWELL_MS = 20_000;
     private static final long TICK_MS = 30_000;
-    /** Music, casting and live TV: not shows you can go back to. */
+
     private static final Set<String> SKIP = new HashSet<>(Arrays.asList(
             "com.spotify.tv.android",
             "com.google.android.youtube.tvmusic",
@@ -51,9 +47,8 @@ final class WatchRecorder implements NowPlaying.Listener {
     public void onNowPlaying(MediaController c, MediaMetadata md, boolean playing) {
         String key = playing && NowPlaying.title(md) != null && !SKIP.contains(c.getPackageName())
                 ? c.getPackageName() + "\n" + NowPlaying.title(md) + "\n" + NowPlaying.subtitle(md) : null;
-        if (key != null && key.equals(activeKey)) return;  // Same thing, still playing.
+        if (key != null && key.equals(activeKey)) return;
 
-        // Paused, stopped or switched to something else: keep where it got to.
         saveProgress();
         handler.removeCallbacks(tick);
         activeKey = key;
@@ -87,12 +82,10 @@ final class WatchRecorder implements NowPlaying.Listener {
         handler.postDelayed(tick, TICK_MS);
     }
 
-    /** Nothing is written while Continue watching is off. */
     private void saveProgress() {
         if (recorded != null && Prefs.continueWatching(context)) history.progress(recorded, position(), duration());
     }
 
-    /** Where playback is now, allowing for time passed since the app last reported it. */
     private long position() {
         PlaybackState s = active != null ? active.getPlaybackState() : null;
         if (s != null && s.getPosition() >= 0) {

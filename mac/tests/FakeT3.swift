@@ -1,11 +1,3 @@
-// A stand-in for T3 Code's server, for mac/tests/run.sh only. It's built as "T3 Code.app/Contents/MacOS/T3 Code"
-// in a temporary folder so the helper's listener check accepts it, listens on loopback only, and is driven by files
-// in <t3 home>/control:
-//   tokens      tokens the fake t3 command issued (one per line); only these are accepted
-//   revoked     revoked tokens: rejected with 401, and their streams are closed at once (as T3 Code does)
-//   fail        while it exists, the shell snapshot answers 503 (T3 Code not ready)
-//   drop        closes every stream once, then is deleted
-//   delay       "<seconds> <title>": the next snapshot waits that long and names its chat <title>; then deleted
 import CryptoKit
 import Foundation
 import Network
@@ -22,7 +14,6 @@ func lines(_ name: String) -> Set<String> {
 
 func exists(_ name: String) -> Bool { fm.fileExists(atPath: control.appendingPathComponent(name).path) }
 
-/** Takes the file if it's there (so each control file acts once). */
 func take(_ name: String) -> String? {
     let url = control.appendingPathComponent(name)
     guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
@@ -48,8 +39,6 @@ func snapshot(_ title: String) -> String {
     return #"{"snapshotSequence":1,"projects":[{"id":"p1","title":"Project"}],"threads":[{"id":"t1","title":"\#(title)","projectId":"p1","status":"running","activityRunStartedAt":"\#(now)"}]}"#
 }
 
-// ---- WebSocket streams ---------------------------------------------------------------------
-
 final class Stream {
     let c: NWConnection
     let token: String
@@ -73,7 +62,6 @@ func close(_ s: Stream) {
     s.c.send(content: frame(0x8, Data([0x03, 0xE8])), completion: .contentProcessed { _ in s.c.cancel() })
 }
 
-/** Client frames are masked; only small text, ping and close frames are expected. */
 func readFrames(_ s: Stream) {
     while s.buf.count >= 2 {
         let b = [UInt8](s.buf.prefix(14))
@@ -97,7 +85,7 @@ func readFrames(_ s: Stream) {
             if msg?["_tag"] as? String == "Ping" {
                 s.c.send(content: frame(0x1, Data(#"{"_tag":"Pong"}"#.utf8)), completion: .contentProcessed { _ in })
             } else if msg?["tag"] as? String == "orchestration.subscribeShell", let id = msg?["id"] as? String {
-                // Nothing new since the snapshot, but the subscription works (the helper resets its backoff).
+
                 let chunk = #"{"_tag":"Chunk","requestId":"\#(id)","values":[]}"#
                 s.c.send(content: frame(0x1, Data(chunk.utf8)), completion: .contentProcessed { _ in })
             }
@@ -130,8 +118,6 @@ func upgrade(_ c: NWConnection, _ headers: [String: String], _ token: String) {
     c.send(content: Data(head.utf8), completion: .contentProcessed { _ in pump(s) })
 }
 
-// ---- HTTP -------------------------------------------------------------------------------
-
 func handle(_ c: NWConnection) {
     c.start(queue: q)
     var buf = Data()
@@ -162,7 +148,7 @@ func route(_ c: NWConnection, _ method: String, _ path: String, _ target: String
            _ bearer: String?) {
     switch (method, path) {
     case ("GET", "/api/orchestration/shell"):
-        // Checked when the request arrives, as T3 Code does; the reply may come later.
+
         guard valid(bearer) else { return reply(c, 401, unauthorized) }
         if exists("fail") { return reply(c, 503, "{}") }
         if let d = take("delay") {
@@ -185,8 +171,6 @@ func route(_ c: NWConnection, _ method: String, _ path: String, _ target: String
     }
 }
 
-// ---- Main -------------------------------------------------------------------------------
-
 try? fm.createDirectory(at: control, withIntermediateDirectories: true)
 try? fm.createDirectory(at: home.appendingPathComponent("userdata"), withIntermediateDirectories: true)
 let params = NWParameters.tcp
@@ -200,7 +184,6 @@ listener.stateUpdateHandler = { s in
 }
 listener.start(queue: q)
 
-// Revocation and drops reach open streams at once.
 let watch = DispatchSource.makeTimerSource(queue: q)
 watch.schedule(deadline: .now(), repeating: 0.05)
 watch.setEventHandler {

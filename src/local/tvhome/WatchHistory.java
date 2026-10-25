@@ -20,10 +20,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * The shows and movies you've played, newest first, kept only on the TV (a small JSON file plus
- * one thumbnail per show). Used from the main thread; disk writes happen on a background thread.
- */
 final class WatchHistory {
     interface Listener {
         void onHistoryChanged();
@@ -43,15 +39,10 @@ final class WatchHistory {
             this.pkg = pkg;
         }
 
-        /** 0..1, or -1 when the app doesn't say how far in you are. */
         float progress() {
             return duration > 0 && position >= 0 ? Math.min(1f, (float) position / duration) : -1;
         }
 
-        /**
-         * Watched to the end, or close enough: the last 10%, or the last 3 minutes of anything 20 minutes
-         * or longer (usually the credits).
-         */
         boolean finished() {
             if (duration <= 0 || position < 0) return false;
             long left = duration - position;
@@ -90,7 +81,7 @@ final class WatchHistory {
                 shows.add(s);
             }
         } catch (IOException | JSONException e) {
-            // No history yet (or an unreadable file): start empty.
+
         }
     }
 
@@ -106,10 +97,6 @@ final class WatchHistory {
         listeners.remove(l);
     }
 
-    /**
-     * Puts a show at the front of the list. An existing entry from the same app with the same title,
-     * or the same show name (the next episode of a series), is updated instead of duplicated.
-     */
     Show record(String pkg, String title, String subtitle, Bitmap art, long position, long duration) {
         Show s = null;
         for (Show x : shows) {
@@ -152,7 +139,6 @@ final class WatchHistory {
         changed();
     }
 
-    /** The show's thumbnail, read from disk the first time it's needed. */
     Bitmap art(Show s) {
         if (!s.artLoaded) {
             s.artLoaded = true;
@@ -167,7 +153,6 @@ final class WatchHistory {
         return s.art;
     }
 
-    /** The colour of the show's artwork, or 0 if it has none. */
     int accent(Show s) {
         art(s);
         return s.accent;
@@ -186,7 +171,7 @@ final class WatchHistory {
             try (FileOutputStream out = new FileOutputStream(f)) {
                 small.compress(Bitmap.CompressFormat.JPEG, 85, out);
             } catch (IOException ignored) {
-                // The thumbnail is a nice-to-have; the show still appears without it.
+
             }
         });
     }
@@ -218,7 +203,7 @@ final class WatchHistory {
                 Files.write(tmp.toPath(), data);
                 if (!tmp.renameTo(file)) tmp.delete();
             } catch (IOException ignored) {
-                // Kept in memory; the next change tries again.
+
             }
         });
         for (Listener l : new ArrayList<>(listeners)) l.onHistoryChanged();

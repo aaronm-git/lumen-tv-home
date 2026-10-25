@@ -1,7 +1,4 @@
 #!/bin/sh
-# Offline tests for the TV's AgentStatus (see AgentStatusTest.java): compiles it with small stand-ins for Android's
-# classes (stubs/) in a temporary folder and runs it on this Mac's JVM against a fake helper on 127.0.0.1. Doesn't
-# need the Android SDK, a TV, an emulator or ADB.
 set -eu
 cd "$(dirname "$0")"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/lumen-android-tests.XXXXXX")

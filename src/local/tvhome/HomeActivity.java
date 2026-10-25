@@ -41,12 +41,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-/**
- * Lumen: a clock, what's playing, the shows you were watching, your favourites and everything else,
- * with a glow that follows your focus.
- */
 public class HomeActivity extends Activity {
-    /** First launch only. US streaming apps (Apple TV's is Sony's build); any that aren't installed are skipped. */
+
     private static final String[] DEFAULT_FAVORITES = {
             "com.google.android.youtube.tv",
             "com.netflix.ninja",
@@ -56,16 +52,13 @@ public class HomeActivity extends Activity {
             "com.apple.atve.sony.appletv",
             "com.spotify.tv.android",
     };
-    /** Sony's Live TV app. Inputs leaves it out on TVs that don't have it. */
+
     private static final String LIVE_TV = "com.sony.dtv.tvx";
     private static final int SIDE = 56;
     private static final int MAX_SHOWS = 10;
-    /** As wide as the Now playing card above it. */
+
     private static final int AGENTS_WIDTH = 380;
-    /**
-     * How long something must keep playing before the Now playing card appears. Apps like YouTube stop and end
-     * their session just after Home takes over, so showing it at once flashes the app you left for a split second.
-     */
+
     private static final int NOW_PLAYING_DELAY_MS = 1200;
 
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
@@ -76,7 +69,7 @@ public class HomeActivity extends Activity {
     private FrameLayout content;
     private GlowBackground glow;
     private TextView greeting, clock, date, heroTitle, heroSub;
-    // The whole page scrolls, so the clock slides away as you go down (like Apple TV's top shelf).
+
     private ScrollView pageScroll;
     private LinearLayout body;
     private LinearLayout firstRow;
@@ -94,10 +87,10 @@ public class HomeActivity extends Activity {
     private NowPlayingCard nowCard;
     private AgentStatus agents;
     private final AgentStatus.Listener agentsListener = this::onAgents;
-    /** Whether the home screen is in front (agent notifications aren't needed then). */
+
     static boolean showing;
     private AgentsCard agentsCard;
-    /** The chat whose details are open (showChat), so they close when it's no longer current. */
+
     private Sheet chatSheet;
     private String chatId;
 
@@ -111,7 +104,6 @@ public class HomeActivity extends Activity {
         }
     };
 
-    /** Redraw at once if the list itself changed; progress-only updates wait until Lumen is next shown. */
     private final WatchHistory.Listener historyListener = () -> {
         if (resumed && sheet == null && !showsKey(visibleShows()).equals(shownShows)) render(null);
         else historyDirty = true;
@@ -166,7 +158,7 @@ public class HomeActivity extends Activity {
         }
         if (prefs.showNowPlaying) nowPlaying.start();
         showing = true;
-        // Nothing current to show yet (it stopped listening meanwhile): don't keep chats from before.
+
         if (agents.last == null) {
             closeChat();
             showAgentsCard(false);
@@ -180,7 +172,7 @@ public class HomeActivity extends Activity {
         resumed = false;
         unregisterReceiver(clockReceiver);
         nowPlaying.stop();
-        // Hidden while away, so coming back waits to see what's really still playing.
+
         root.removeCallbacks(revealNowCard);
         if (nowCard.hasFocus()) goToStart();
         nowCard.setVisibility(View.GONE);
@@ -197,7 +189,6 @@ public class HomeActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Home pressed: close anything open and land on the first tile (the show you just left). */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -209,7 +200,7 @@ public class HomeActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // A home screen has nowhere to go back to.
+
         if (sheet != null) sheet.dismiss();
         else goToStart();
     }
@@ -248,8 +239,6 @@ public class HomeActivity extends Activity {
         return super.dispatchKeyEvent(ev);
     }
 
-    // ---- Layout ---------------------------------------------------------------------------
-
     private void buildLayout() {
         grid = "grid".equals(prefs.layout);
         root = new FrameLayout(this);
@@ -261,7 +250,6 @@ public class HomeActivity extends Activity {
         content.setClipToPadding(false);
         root.addView(content, match());
 
-        // Clock on the left; Inputs and Settings on the right, with Now playing and Agents below them.
         FrameLayout top = new FrameLayout(this);
         top.setClipChildren(false);
         LinearLayout header = new LinearLayout(this);
@@ -315,7 +303,6 @@ public class HomeActivity extends Activity {
             }
         };
 
-        // The right-hand column sits beside the hero text, so it only pushes the rows down when it's taller.
         LinearLayout side = new LinearLayout(this);
         side.setOrientation(LinearLayout.VERTICAL);
         side.setGravity(Gravity.END);
@@ -439,8 +426,6 @@ public class HomeActivity extends Activity {
         return Ui.dp(this, v);
     }
 
-    // ---- Clock -----------------------------------------------------------------------------
-
     private void updateClock() {
         Calendar now = Calendar.getInstance();
         clock.setText(DateFormat.format(DateFormat.is24HourFormat(this) ? "H:mm" : "h:mm", now));
@@ -460,8 +445,6 @@ public class HomeActivity extends Activity {
         return "Good evening";
     }
 
-    // ---- Apps ------------------------------------------------------------------------------
-
     private void reload(String focusPkg) {
         loader.execute(() -> {
             List<AppEntry> loaded = AppEntry.loadAll(this);
@@ -479,10 +462,6 @@ public class HomeActivity extends Activity {
         return byPkg;
     }
 
-    /**
-     * Recent shows whose app is still installed, leaving out ones you've finished. Playing the next
-     * episode of a series replaces its entry, so it comes back then.
-     */
     private List<WatchHistory.Show> visibleShows() {
         List<WatchHistory.Show> out = new ArrayList<>();
         if (!prefs.showContinue) return out;
@@ -510,10 +489,6 @@ public class HomeActivity extends Activity {
         return out;
     }
 
-    /**
-     * Rebuilds every row, then puts focus back on the same show or app in the same row (or the same
-     * spot if it's gone). Focus elsewhere, like on Now playing, is left alone.
-     */
     private void render(String focusPkg) {
         View focused = getCurrentFocus();
         TileView was = focused instanceof TileView ? (TileView) focused : null;
@@ -569,10 +544,6 @@ public class HomeActivity extends Activity {
         if (target != null) target.requestFocus();
     }
 
-    /**
-     * Continue watching: a sideways row whose tiles are sized four across, so its edges line up
-     * with the rows and grid below.
-     */
     private void showSection(List<WatchHistory.Show> shows) {
         body.addView(sectionLabel("CONTINUE WATCHING"), indented(0));
         LinearLayout row = new LinearLayout(this);
@@ -623,13 +594,11 @@ public class HomeActivity extends Activity {
         return null;
     }
 
-    /** The most recent show, or the first app if there are no shows. */
     private View firstTile() {
         if (!showTiles.isEmpty()) return showTiles.get(0);
         return tiles.isEmpty() ? null : tiles.get(0);
     }
 
-    /** A labelled row that scrolls sideways (Rows layout). */
     private void rowSection(String label, List<AppEntry> list, int section, int w, int h, int gap) {
         body.addView(sectionLabel(label), indented(0));
         LinearLayout row = new LinearLayout(this);
@@ -638,7 +607,6 @@ public class HomeActivity extends Activity {
         for (AppEntry e : list) row.addView(tile(e, section, w, h, gap));
     }
 
-    /** A labelled block of tiles five to a row (Grid layout). The first favCount are favourites. */
     private void gridSection(String label, List<AppEntry> list, int favCount) {
         body.addView(sectionLabel(label), indented(0));
         int cols = 5, gap = dp(24);
@@ -676,7 +644,7 @@ public class HomeActivity extends Activity {
                     : section == TileView.FAVORITE ? "Favorite  ·  hold OK for options"
                     : "Hold OK to add to Favorites";
             setHero(e.label, hint, e.accent);
-            // Like Apple TV: the top row brings the clock back into view.
+
             if (t.getParent() == firstRow) pageScroll.post(() -> pageScroll.smoothScrollTo(0, 0));
         });
         t.setMoving(moving);
@@ -684,7 +652,6 @@ public class HomeActivity extends Activity {
         return t;
     }
 
-    /** The app's tile in the given row if it's there, otherwise wherever it is. */
     private TileView findTile(String pkg, int section) {
         if (pkg == null) return null;
         TileView fallback = null;
@@ -715,8 +682,6 @@ public class HomeActivity extends Activity {
             Toast.makeText(this, "Couldn't open that", Toast.LENGTH_SHORT).show();
         }
     }
-
-    // ---- Editing ---------------------------------------------------------------------------
 
     private void showOptions(TileView t) {
         AppEntry e = t.app;
@@ -757,8 +722,6 @@ public class HomeActivity extends Activity {
         s.add("Clear Continue watching", "Removes every show from the row", false, history::clear);
         s.show();
     }
-
-    // ---- Settings --------------------------------------------------------------------------
 
     private void showSettings() {
         Sheet s = new Sheet("Settings");
@@ -862,8 +825,6 @@ public class HomeActivity extends Activity {
         render(pkg);
     }
 
-    // ---- Now playing -----------------------------------------------------------------------
-
     private void onNowPlaying(MediaController c, MediaMetadata md, boolean playing) {
         root.removeCallbacks(revealNowCard);
         if (c == null || !prefs.showNowPlaying) {
@@ -879,7 +840,6 @@ public class HomeActivity extends Activity {
         }
     }
 
-    /** Fades the card in, sliding a little from the right, once what it shows has lasted (NOW_PLAYING_DELAY_MS). */
     private final Runnable revealNowCard = () -> {
         nowCard.setVisibility(View.VISIBLE);
         nowCard.setAlpha(0f);
@@ -899,7 +859,6 @@ public class HomeActivity extends Activity {
         if (c != null) openPlayer(c, c.getPackageName());
     }
 
-    /** Opens the exact screen the app asked for (usually its player), or else just the app. */
     private void openPlayer(MediaController c, String pkg) {
         PendingIntent player = c != null ? c.getSessionActivity() : null;
         if (player != null) {
@@ -907,7 +866,7 @@ public class HomeActivity extends Activity {
                 player.send();
                 return;
             } catch (PendingIntent.CanceledException ignored) {
-                // Fall back to opening the app.
+
             }
         }
         Intent launch = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
@@ -921,15 +880,13 @@ public class HomeActivity extends Activity {
         else c.getTransportControls().play();
     }
 
-    // ---- Agents ----------------------------------------------------------------------------
-
     private void onAgents(AgentStatus.Snapshot s) {
         if (!prefs.showAgents) return;
         if (chatSheet != null && !(s.active() && listed(s, chatId))) closeChat();
         boolean focused = agentsCard.hasFocus();
         boolean show = prefs.showAgents && agentsCard.bind(s);
         showAgentsCard(show);
-        // The focused chat became a line you can't select, like "Mac offline".
+
         if (focused && show && !agentsCard.hasFocus()) goToStart();
     }
 
@@ -947,7 +904,7 @@ public class HomeActivity extends Activity {
     private void showAgentsCard(boolean show) {
         if (!show && agentsCard.hasFocus()) goToStart();
         agentsCard.setVisibility(show ? View.VISIBLE : View.GONE);
-        // Long hero titles would run under the card.
+
         int max = show ? getResources().getDisplayMetrics().widthPixels - dp(2 * SIDE + AGENTS_WIDTH + 24)
                 : Integer.MAX_VALUE;
         heroTitle.setMaxWidth(max);
@@ -955,7 +912,7 @@ public class HomeActivity extends Activity {
     }
 
     private String agentsSetting() {
-        // Chat titles, projects and what a chat last said come from the Mac and show on the TV.
+
         if (!prefs.showAgents) return "Off  ·  shows T3 Code chats from a Mac running Lumen Agents";
         AgentStatus.Snapshot s = agents.last;
         if (s != null && s.phase == AgentStatus.PAIRING) return "On  ·  pair with code " + AgentStatus.grouped(s.code);
@@ -963,7 +920,6 @@ public class HomeActivity extends Activity {
         return "On  ·  chat titles, projects and replies from " + from;
     }
 
-    /** There's no T3 Code on the TV, so OK just shows what the chat is up to. */
     private void showChat(AgentStatus.Chat c) {
         Sheet s = new Sheet(c.title);
         List<String> about = new ArrayList<>();
@@ -979,8 +935,6 @@ public class HomeActivity extends Activity {
         chatSheet = s;
         chatId = c.id;
     }
-
-    // ---- Inputs ----------------------------------------------------------------------------
 
     private void showInputs() {
         Sheet s = new Sheet("Inputs");
@@ -998,7 +952,7 @@ public class HomeActivity extends Activity {
             }
             List<TvInputInfo> ports = new ArrayList<>();
             for (TvInputInfo info : all) {
-                // A port with a named device on it (via HDMI-CEC) is listed by the device's name instead.
+
                 if (info.isPassthroughInput() && !parents.contains(info.getId())) ports.add(info);
             }
             ports.sort((x, y) -> Integer.compare(state(tim, x, byId), state(tim, y, byId)));
@@ -1016,7 +970,6 @@ public class HomeActivity extends Activity {
         s.show();
     }
 
-    /** Best of the input's own state and its port's state (a sleeping device on a live port is still usable). */
     private static int state(TvInputManager tim, TvInputInfo info, Map<String, TvInputInfo> byId) {
         int st = tim.getInputState(info.getId());
         TvInputInfo parent = info.getParentId() != null ? byId.get(info.getParentId()) : null;
@@ -1028,9 +981,6 @@ public class HomeActivity extends Activity {
         return (TextUtils.isEmpty(custom) ? info.loadLabel(this) : custom).toString();
     }
 
-    // ---- Pop-up sheet ----------------------------------------------------------------------
-
-    /** A centred card of choices over a dimmed screen. Back closes it. */
     private final class Sheet {
         private final FrameLayout scrim = new FrameLayout(HomeActivity.this);
         private final LinearLayout list = new LinearLayout(HomeActivity.this);
@@ -1056,7 +1006,6 @@ public class HomeActivity extends Activity {
                     dp(400), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         }
 
-        /** Text that can't be selected, such as what a chat last said. */
         void note(String text, int color) {
             TextView t = text(14, color, "sans-serif");
             t.setShadowLayer(0, 0, 0, 0);
@@ -1068,7 +1017,6 @@ public class HomeActivity extends Activity {
             list.addView(t);
         }
 
-        /** Settings stay focused while their labels and any dependent choices update in place. */
         void choice(Supplier<String> title, Supplier<String> detail, Runnable action) {
             LinearLayout item = add(title.get(), detail.get(), false, false, () -> {
                 action.run();
@@ -1124,7 +1072,6 @@ public class HomeActivity extends Activity {
             return item;
         }
 
-        /** A heading and a long text, such as a license. Focusable, so the remote scrolls through them. */
         void notice(String title, String text) {
             add(title, text, false, () -> {});
             TextView b = (TextView) ((ViewGroup) list.getChildAt(list.getChildCount() - 1)).getChildAt(1);
@@ -1148,7 +1095,7 @@ public class HomeActivity extends Activity {
         }
 
         void dismiss() {
-            // Not kept once closed: it holds what the chat last said.
+
             if (chatSheet == this) {
                 chatSheet = null;
                 chatId = null;

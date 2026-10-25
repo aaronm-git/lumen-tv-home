@@ -65,7 +65,7 @@ Lumen is a small personal project. Changes are reviewed as time allows.
 
 - Use plain Java with the Android framework for the TV app, without libraries or Gradle. Use Foundation, Network, and CryptoKit for the Swift helper.
 - Keep memory use small. Prefer a held request to polling, and don't add extra permissions.
-- Match surrounding code: short comments that explain why, plain names, and the same layout.
+- Write self-descriptive code with clear names and structure. Do not add code comments; rewrite unclear code instead. Keep explanations and license notices in documentation or license files.
 - Keep all T3 Code-specific code in *`mac/LumenAgents.swift`*, outside the TV app.
 
 ## Report a bug

@@ -15,7 +15,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** A show's artwork with its title, the app it's in, and how far through you are. */
 final class ShowTile extends Tile {
     final WatchHistory.Show show;
     final AppEntry app;
@@ -32,7 +31,6 @@ final class ShowTile extends Tile {
         else image.setBackgroundColor(Ui.mix(accent, 0xFF000000, 0.6f));
         addView(image, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        // Darken the bottom so the title reads over any artwork.
         View shade = new View(c);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
                 new int[]{0xE6000000, 0x99000000, 0x00000000}));
@@ -46,7 +44,6 @@ final class ShowTile extends Tile {
         if (show.subtitle != null) texts.addView(label(c, show.subtitle, 11, 0xB3FFFFFF, "sans-serif"));
         addView(texts, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
 
-        // The app's icon in the corner, since the artwork alone doesn't say where it's playing.
         ImageView badge = new ImageView(c);
         badge.setImageDrawable(app.icon);
         badge.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -85,7 +82,6 @@ final class ShowTile extends Tile {
         return t;
     }
 
-    /** A thin white bar on a faint track. */
     private static final class ProgressBar extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final float progress;
